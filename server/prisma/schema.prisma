@@ -1,0 +1,117 @@
+// Prisma 7: the database address lives in prisma.config.mjs, not here.
+// `prisma-client-js` is used (instead of the newer `prisma-client`) because it generates plain JavaScript;
+// the newer generator only emits TypeScript.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id              Int           @id @default(autoincrement())
+  name            String
+  email           String        @unique
+  passwordHash    String
+  isPlatformAdmin Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+  ownedOrgs       OrgOwner[]
+  stationRoles    StationRole[]
+  payments        Payment[]
+}
+
+// The paying customer. Created only after a payment is verified.
+model Organisation {
+  id        String     @id @default(cuid())
+  name      String
+  status    String     @default("active") // 'active' | 'suspended'
+  paymentId String?    @unique
+  createdAt DateTime   @default(now())
+  payment   Payment?   @relation(fields: [paymentId], references: [id])
+  owners    OrgOwner[]
+  stations  Station[]
+}
+
+model OrgOwner {
+  userId         Int
+  organisationId String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+
+  @@id([userId, organisationId])
+  @@index([organisationId])
+}
+
+// A fuel station. At most 5 per organisation (enforced in the API).
+model Station {
+  id             String        @id @default(cuid())
+  organisationId String
+  name           String
+  address        String?
+  createdAt      DateTime      @default(now())
+  organisation   Organisation  @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  roles          StationRole[]
+  settings       Setting[]
+  days           DayEntry[]
+
+  @@index([organisationId])
+}
+
+// Staff role at one station: 'manager' | 'attendant'. Organisation owners need no row here.
+model StationRole {
+  userId    Int
+  stationId String
+  role      String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  station   Station @relation(fields: [stationId], references: [id], onDelete: Cascade)
+
+  @@id([userId, stationId])
+  @@index([stationId])
+}
+
+// 'config' and 'adjustments:YYYY-MM', per station
+model Setting {
+  stationId String
+  key       String
+  value     Json
+  station   Station @relation(fields: [stationId], references: [id], onDelete: Cascade)
+
+  @@id([stationId, key])
+}
+
+// One row per station per trading day: raw inputs only. Every calculated figure comes from the engine.
+model DayEntry {
+  stationId   String
+  date        String   // YYYY-MM-DD
+  data        Json
+  updatedById Int?
+  updatedAt   DateTime @updatedAt
+  station     Station  @relation(fields: [stationId], references: [id], onDelete: Cascade)
+
+  @@id([stationId, date])
+}
+
+model Payment {
+  id               String        @id @default(cuid())
+  txRef            String        @unique
+  userId           Int
+  organisationName String
+  amount           Int
+  currency         String
+  status           String        @default("pending") // 'pending' | 'successful' | 'failed'
+  flwTransactionId String?
+  createdAt        DateTime      @default(now())
+  user             User          @relation(fields: [userId], references: [id])
+  organisation     Organisation?
+
+  @@index([userId])
+}
+
+// Failed-login and sign-up attempt counters. In the database (not in memory) so the limit holds across
+// serverless instances.
+model RateLimit {
+  key     String   @id
+  count   Int
+  resetAt DateTime
+}
