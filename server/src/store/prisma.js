@@ -1,6 +1,7 @@
 // PostgreSQL store (Prisma 7 + the pg driver adapter). Same interface as store/memory.js.
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { addInterval, renewalBase } from '../subscription.js';
 
 /**
  * Prisma 7 needs a driver adapter: it connects to the database itself.
@@ -48,25 +49,32 @@ export function createPrismaStore(prisma = createPrismaClient()) {
       prisma.user.create({ data: { name, email, passwordHash, isPlatformAdmin } }),
 
     // ---- payments
-    createPayment: ({ txRef, userId, organisationName, amount, currency }) =>
-      prisma.payment.create({ data: { txRef, userId, organisationName, amount, currency } }),
+    createPayment: ({ txRef, userId, organisationName, amount, currency, kind = 'signup', organisationId = null, withPlan = false }) =>
+      prisma.payment.create({ data: { txRef, userId: userId ?? null, organisationName, amount, currency, kind, organisationId, withPlan } }),
     getPaymentByTxRef: (txRef) => prisma.payment.findUnique({ where: { txRef } }),
     async markPaymentFailed(txRef) {
       await prisma.payment.updateMany({ where: { txRef, status: 'pending' }, data: { status: 'failed' } });
     },
     /**
-     * Creates the organisation for a verified payment, exactly once. Organisation.paymentId is UNIQUE, so two
+     * Creates the organisation for a verified signup payment, exactly once. Organisation.paymentId is UNIQUE, so two
      * requests racing (the browser redirect and Flutterwave's webhook) cannot create two organisations.
      */
-    async fulfilPayment(txRef, flwTransactionId) {
+    async fulfilPayment(txRef, flwTransactionId, { interval }) {
       const payment = await prisma.payment.findUnique({ where: { txRef } });
       if (!payment) throw new Error('Unknown payment');
       const existing = await prisma.organisation.findUnique({ where: { paymentId: payment.id } });
       if (existing) return { organisation: existing, created: false };
+      const payer = payment.userId ? await prisma.user.findUnique({ where: { id: payment.userId } }) : null;
       try {
         const organisation = await prisma.$transaction(async (tx) => {
           const org = await tx.organisation.create({
-            data: { name: payment.organisationName, paymentId: payment.id, owners: { create: { userId: payment.userId } } },
+            data: {
+              name: payment.organisationName,
+              paymentId: payment.id,
+              paidUntil: addInterval(new Date(), interval),
+              autoRenewEmail: payment.withPlan && payer ? payer.email.toLowerCase() : null,
+              owners: { create: { userId: payment.userId } },
+            },
           });
           await tx.payment.update({ where: { id: payment.id }, data: { status: 'successful', flwTransactionId } });
           return org;
@@ -79,6 +87,62 @@ export function createPrismaStore(prisma = createPrismaClient()) {
         }
         throw e;
       }
+    },
+    /**
+     * Extends an organisation for a verified renewal payment, exactly once per payment: the payment row is "claimed"
+     * by an UPDATE ... WHERE status = 'pending', and only the request that wins the claim extends the date.
+     */
+    async applyRenewal(txRef, flwTransactionId, { interval }) {
+      const payment = await prisma.payment.findUnique({ where: { txRef } });
+      if (!payment || payment.kind !== 'renewal' || !payment.organisationId) throw new Error('Unknown renewal payment');
+      return prisma.$transaction(async (tx) => {
+        const claim = await tx.payment.updateMany({ where: { txRef, status: 'pending' }, data: { status: 'successful', flwTransactionId } });
+        const org = await tx.organisation.findUnique({ where: { id: payment.organisationId } });
+        if (claim.count === 0) return { organisation: org, applied: false };
+        const payer = payment.userId ? await tx.user.findUnique({ where: { id: payment.userId } }) : null;
+        const updated = await tx.organisation.update({
+          where: { id: org.id },
+          data: {
+            paidUntil: addInterval(renewalBase(org.paidUntil), interval),
+            ...(payment.withPlan && payer ? { autoRenewEmail: payer.email.toLowerCase() } : {}),
+          },
+        });
+        return { organisation: updated, applied: true };
+      });
+    },
+    /** A charge Flutterwave made by itself on an automatic-renewal plan. See memory.js for the rules. */
+    async recordAutoRenewal({ flwTransactionId, email, amount, currency, interval }) {
+      const txRef = `flw_${flwTransactionId}`;
+      const mail = String(email ?? '').toLowerCase();
+      const org = await prisma.organisation.findFirst({ where: { autoRenewEmail: mail } });
+      const user = await prisma.user.findUnique({ where: { email: mail } });
+      try {
+        return await prisma.$transaction(async (tx) => {
+          await tx.payment.create({
+            data: {
+              txRef, userId: user?.id ?? null, organisationName: org?.name ?? mail, amount, currency, kind: 'renewal',
+              organisationId: org?.id ?? null, withPlan: true, status: org ? 'successful' : 'unmatched', flwTransactionId: String(flwTransactionId),
+            },
+          });
+          if (!org) return { duplicate: false, matched: false, organisation: null };
+          const fresh = await tx.organisation.findUnique({ where: { id: org.id } });
+          const updated = await tx.organisation.update({ where: { id: org.id }, data: { paidUntil: addInterval(renewalBase(fresh.paidUntil), interval) } });
+          return { duplicate: false, matched: true, organisation: updated };
+        });
+      } catch (e) {
+        if (unique(e)) return { duplicate: true };
+        throw e;
+      }
+    },
+    listUnmatchedPayments: () => prisma.payment.findMany({ where: { status: 'unmatched' }, orderBy: { createdAt: 'desc' } }),
+    async assignPayment(txRef, organisationId, { interval }) {
+      return prisma.$transaction(async (tx) => {
+        const claim = await tx.payment.updateMany({ where: { txRef, status: 'unmatched' }, data: { status: 'successful', organisationId } });
+        if (claim.count === 0) return null;
+        const org = await tx.organisation.findUnique({ where: { id: organisationId } });
+        if (!org) throw new Error('Unknown organisation');
+        return tx.organisation.update({ where: { id: org.id }, data: { paidUntil: addInterval(renewalBase(org.paidUntil), interval) } });
+      });
     },
 
     // ---- organisations
@@ -108,6 +172,23 @@ export function createPrismaStore(prisma = createPrismaClient()) {
         orderBy: { createdAt: 'desc' },
       });
       return rows.map((o) => ({ ...plainOrg(o), owners: o.owners.map((x) => x.user) }));
+    },
+    findOrganisationByAutoRenewEmail: (email) => prisma.organisation.findFirst({ where: { autoRenewEmail: String(email ?? '').toLowerCase() } }),
+    async setAutoRenewEmail(id, email) {
+      try {
+        return await prisma.organisation.update({ where: { id }, data: { autoRenewEmail: email ? String(email).toLowerCase() : null } });
+      } catch (e) {
+        if (notFound(e)) return null;
+        throw e;
+      }
+    },
+    async setPaidUntil(id, date) {
+      try {
+        return await prisma.organisation.update({ where: { id }, data: { paidUntil: date ? new Date(date) : null } });
+      } catch (e) {
+        if (notFound(e)) return null;
+        throw e;
+      }
     },
     async isOrgOwner(userId, orgId) {
       return Boolean(await prisma.orgOwner.findUnique({ where: { userId_organisationId: { userId, organisationId: orgId } } }));
@@ -195,14 +276,43 @@ export function createPrismaStore(prisma = createPrismaClient()) {
     },
     async getDay(stationId, date) {
       const r = await prisma.dayEntry.findUnique({ where: { stationId_date: { stationId, date } } });
-      return r ? { date: r.date, data: r.data } : null;
+      return r ? { date: r.date, data: r.data, version: r.version } : null;
     },
-    async upsertDay(stationId, date, data, updatedById) {
-      await prisma.dayEntry.upsert({
-        where: { stationId_date: { stationId, date } },
-        create: { stationId, date, data, updatedById: updatedById ?? null },
-        update: { data, updatedById: updatedById ?? null },
+    /**
+     * Saves a day and bumps its version. If `expectedVersion` is given (0 = "must not exist yet") and someone else
+     * saved in the meantime, nothing is written and the current copy is returned. The check and the write are one
+     * statement, so two phones syncing at the same moment cannot both win.
+     */
+    async saveDay(stationId, date, data, updatedById, expectedVersion) {
+      const by = updatedById ?? null;
+      const key = { stationId_date: { stationId, date } };
+      const current = async () => {
+        const r = await prisma.dayEntry.findUnique({ where: key });
+        return r ? { data: r.data, version: r.version } : null;
+      };
+      if (expectedVersion === undefined) {
+        const r = await prisma.dayEntry.upsert({
+          where: key,
+          create: { stationId, date, data, updatedById: by },
+          update: { data, updatedById: by, version: { increment: 1 } },
+        });
+        return { conflict: false, version: r.version };
+      }
+      if (expectedVersion === 0) {
+        try {
+          const r = await prisma.dayEntry.create({ data: { stationId, date, data, updatedById: by } });
+          return { conflict: false, version: r.version };
+        } catch (e) {
+          if (unique(e)) return { conflict: true, current: await current() };
+          throw e;
+        }
+      }
+      const res = await prisma.dayEntry.updateMany({
+        where: { stationId, date, version: expectedVersion },
+        data: { data, updatedById: by, version: { increment: 1 } },
       });
+      if (res.count === 0) return { conflict: true, current: await current() };
+      return { conflict: false, version: expectedVersion + 1 };
     },
     async deleteDay(stationId, date) {
       await prisma.dayEntry.deleteMany({ where: { stationId, date } });

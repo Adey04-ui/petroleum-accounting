@@ -9,16 +9,18 @@ CREATE TABLE "User" (
 CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
 
 CREATE TABLE "Payment" (
-  "id" TEXT PRIMARY KEY, "txRef" TEXT NOT NULL, "userId" INTEGER NOT NULL REFERENCES "User"("id") ON DELETE RESTRICT,
+  "id" TEXT PRIMARY KEY, "txRef" TEXT NOT NULL, "userId" INTEGER REFERENCES "User"("id") ON DELETE SET NULL,
   "organisationName" TEXT NOT NULL, "amount" INTEGER NOT NULL, "currency" TEXT NOT NULL,
+  "kind" TEXT NOT NULL DEFAULT 'signup', "organisationId" TEXT, "withPlan" BOOLEAN NOT NULL DEFAULT false,
   "status" TEXT NOT NULL DEFAULT 'pending', "flwTransactionId" TEXT, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX "Payment_txRef_key" ON "Payment"("txRef");
 CREATE INDEX "Payment_userId_idx" ON "Payment"("userId");
+CREATE INDEX "Payment_organisationId_idx" ON "Payment"("organisationId");
 
 CREATE TABLE "Organisation" (
   "id" TEXT PRIMARY KEY, "name" TEXT NOT NULL, "status" TEXT NOT NULL DEFAULT 'active',
-  "paymentId" TEXT REFERENCES "Payment"("id") ON DELETE SET NULL, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+  "paymentId" TEXT REFERENCES "Payment"("id") ON DELETE SET NULL, "paidUntil" TIMESTAMP(3), "autoRenewEmail" TEXT, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX "Organisation_paymentId_key" ON "Organisation"("paymentId");
 
@@ -49,7 +51,7 @@ CREATE TABLE "Setting" (
 
 CREATE TABLE "DayEntry" (
   "stationId" TEXT NOT NULL REFERENCES "Station"("id") ON DELETE CASCADE,
-  "date" TEXT NOT NULL, "data" JSONB NOT NULL, "updatedById" INTEGER, "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "date" TEXT NOT NULL, "data" JSONB NOT NULL, "version" INTEGER NOT NULL DEFAULT 1, "updatedById" INTEGER, "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY ("stationId", "date")
 );
 

@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, getToken, setToken, setStation } from './api.js';
+import { clearAll } from './offline.js';
+import { queuedItems, startAutoSync } from './sync.js';
 import { Sheet, BackChevron } from './ui.jsx';
 import Auth from './pages/Auth.jsx';
 import Home from './pages/Home.jsx';
@@ -8,6 +10,7 @@ import PaymentReturn from './pages/PaymentReturn.jsx';
 import Org from './pages/Org.jsx';
 import Platform from './pages/Platform.jsx';
 import Station from './pages/Station.jsx';
+import { SyncBadge, SyncList } from './pages/Sync.jsx';
 
 /** Flutterwave sends the customer back to /?payment=return&status=...&tx_ref=...&transaction_id=... */
 function readPaymentParams() {
@@ -28,14 +31,30 @@ function useScrolled() {
   return scrolled;
 }
 
+function useOnline() {
+  const [online, setOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine !== false);
+  useEffect(() => {
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
+    window.addEventListener('online', up);
+    window.addEventListener('offline', down);
+    return () => {
+      window.removeEventListener('online', up);
+      window.removeEventListener('offline', down);
+    };
+  }, []);
+  return online;
+}
+
 export default function App() {
   const [me, setMe] = useState(null);
   const [loading, setLoading] = useState(Boolean(getToken()));
   const [view, setView] = useState({ name: 'home' });
   const [trail, setTrail] = useState([]);
   const [payment, setPayment] = useState(readPaymentParams);
-  const [account, setAccount] = useState(false);
+  const [sheet, setSheet] = useState(null); // 'account' | 'sync'
   const scrolled = useScrolled();
+  const online = useOnline();
   const firstLoad = useRef(true);
 
   const refreshMe = useCallback(async () => {
@@ -57,6 +76,10 @@ export default function App() {
   useEffect(() => {
     if (getToken()) refreshMe();
   }, [refreshMe]);
+
+  // Upload anything saved on this phone while there was no signal: now, when signal returns, and every half minute.
+  const userId = me?.user.id;
+  useEffect(() => (userId ? startAutoSync(userId) : undefined), [userId]);
 
   // Someone who works at exactly one station and owns nothing goes straight to it.
   useEffect(() => {
@@ -83,13 +106,16 @@ export default function App() {
     window.scrollTo({ top: 0 });
   };
 
-  const signOut = () => {
+  const signOut = async () => {
+    const waiting = me ? (await queuedItems(me.user.id)).length : 0;
+    if (waiting > 0 && !window.confirm(`${waiting} saved ${waiting === 1 ? 'day has' : 'days have'} not uploaded yet. If you sign out, ${waiting === 1 ? 'it' : 'they'} will be deleted from this phone. Sign out anyway?`)) return;
+    await clearAll();
     setToken(null);
     setStation(null);
     setMe(null);
     setView({ name: 'home' });
     setTrail([]);
-    setAccount(false);
+    setSheet(null);
     firstLoad.current = true;
   };
 
@@ -122,13 +148,13 @@ export default function App() {
     content = <NewOrganisation me={me} />;
   } else if (view.name === 'org') {
     title = me.organisations.find((o) => o.id === view.orgId)?.name ?? 'Organisation';
-    content = <Org key={view.orgId} orgId={view.orgId} go={go} refreshMe={refreshMe} />;
+    content = <Org key={view.orgId} orgId={view.orgId} go={go} refreshMe={refreshMe} me={me} />;
   } else if (view.name === 'platform') {
     title = 'Platform';
     content = <Platform />;
   } else if (view.name === 'station') {
     title = me.stations.find((s) => s.id === view.stationId)?.name ?? 'Station';
-    content = <Station key={view.stationId} stationId={view.stationId} me={me} go={go} />;
+    content = <Station key={`${view.stationId}${view.date ?? ''}`} stationId={view.stationId} me={me} go={go} date={view.date} />;
   } else {
     title = 'Home';
     content = <Home me={me} go={go} />;
@@ -148,15 +174,17 @@ export default function App() {
           )}
         </div>
         <div className="bar-title">{title}</div>
-        <div className="right">
-          <button className="avatar" onClick={() => setAccount(true)} aria-label="Account">{initial}</button>
+        <div className="right row" style={{ flexWrap: 'nowrap', justifyContent: 'flex-end' }}>
+          {(!online || me.offline) && <span className="pill warn">Offline</span>}
+          <SyncBadge userId={me.user.id} onOpen={() => setSheet('sync')} />
+          <button className="avatar" onClick={() => setSheet('account')} aria-label="Account">{initial}</button>
         </div>
       </header>
 
       {content}
 
-      {account && (
-        <Sheet title="Account" onClose={() => setAccount(false)} leading={<span />}>
+      {sheet === 'account' && (
+        <Sheet title="Account" onClose={() => setSheet(null)} leading={<span />}>
           {(close) => (
             <>
               <div className="card">
@@ -166,6 +194,11 @@ export default function App() {
               <button className="btn ghost block" onClick={() => { close(); setTimeout(signOut, 250); }} style={{ color: 'var(--negative)' }}>Sign out</button>
             </>
           )}
+        </Sheet>
+      )}
+      {sheet === 'sync' && (
+        <Sheet title="Saved on this phone" onClose={() => setSheet(null)}>
+          {(close) => <SyncList me={me} go={go} close={close} />}
         </Sheet>
       )}
     </div>

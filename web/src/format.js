@@ -16,3 +16,5 @@ export const money = (amount, currency = 'NGN') => {
   }
 };
 export const ROLE_NAMES = { owner: 'Owner', manager: 'Manager', attendant: 'Attendant' };
+export const dateLong = (iso) => (iso ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : '');
+export const PERIOD = { yearly: 'year', monthly: 'month' };

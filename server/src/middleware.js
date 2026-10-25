@@ -1,6 +1,9 @@
 import jwt from 'jsonwebtoken';
 import { HttpError, wrap } from './http.js';
 import { can } from './permissions.js';
+import { subscriptionState } from './subscription.js';
+
+export const EXPIRED_MESSAGE = 'The subscription has ended, so changes are switched off. The owner can renew it from the organisation page. Everything can still be viewed and downloaded.';
 
 export function createAuth(store, jwtSecret) {
   return wrap(async (req, res, next) => {
@@ -33,6 +36,7 @@ export function createStationContext(store) {
     req.station = station;
     req.org = org;
     req.role = role;
+    req.subscription = subscriptionState(org);
     next();
   });
 }
@@ -43,6 +47,8 @@ export function createOrgContext(store, { allowSuspended = false } = {}) {
     const org = await store.getOrganisation(req.params.orgId);
     if (!org || !(await store.isOrgOwner(req.user.id, org.id))) throw new HttpError(404, 'Organisation not found');
     if (!allowSuspended && org.status !== 'active') throw new HttpError(403, 'This organisation is suspended. Please contact support.');
+    // An organisation whose subscription has run out (and its grace period) can look, but not change anything.
+    if (!allowSuspended && req.method !== 'GET' && subscriptionState(org) === 'expired') throw new HttpError(402, EXPIRED_MESSAGE, { code: 'SUBSCRIPTION_EXPIRED' });
     req.org = org;
     next();
   });

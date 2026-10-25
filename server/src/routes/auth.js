@@ -3,10 +3,11 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { HttpError, wrap, cleanName } from '../http.js';
 import { MAX_STATIONS_PER_ORG } from '../limits.js';
+import { subscriptionView } from './billing.js';
 
 const publicUser = (u) => ({ id: u.id, name: u.name, email: u.email, isPlatformAdmin: u.isPlatformAdmin });
 
-export function authRoutes({ store, jwtSecret, auth, pricing, flutterwave, loginLimit = 10 }) {
+export function authRoutes({ store, jwtSecret, auth, pricing, flutterwave, loginLimit = 10, autoRenewAvailable = false }) {
   const r = express.Router();
   // Counted in the database, so the limit holds even when requests land on different serverless instances.
   const limit = async (key, max, windowMs) => {
@@ -52,7 +53,7 @@ export function authRoutes({ store, jwtSecret, auth, pricing, flutterwave, login
       const stations = new Map();
       for (const o of orgs) {
         for (const s of await store.listStations(o.id)) {
-          stations.set(s.id, { id: s.id, name: s.name, address: s.address, organisationId: o.id, organisationName: o.name, role: 'owner' });
+          stations.set(s.id, { id: s.id, name: s.name, address: s.address, organisationId: o.id, organisationName: o.name, role: 'owner', subscription: subscriptionView(o, pricing).state });
         }
       }
       for (const row of await store.listStationRolesForUser(user.id)) {
@@ -60,15 +61,15 @@ export function authRoutes({ store, jwtSecret, auth, pricing, flutterwave, login
         const s = await store.getStation(row.stationId);
         const o = s && (await store.getOrganisation(s.organisationId));
         if (s && o && o.status === 'active') {
-          stations.set(s.id, { id: s.id, name: s.name, address: s.address, organisationId: o.id, organisationName: o.name, role: row.role });
+          stations.set(s.id, { id: s.id, name: s.name, address: s.address, organisationId: o.id, organisationName: o.name, role: row.role, subscription: subscriptionView(o, pricing).state });
         }
       }
       res.json({
         user: publicUser(user),
-        organisations: orgs.map((o) => ({ id: o.id, name: o.name, status: o.status, stationCount: o.stationCount })),
+        organisations: orgs.map((o) => ({ id: o.id, name: o.name, status: o.status, stationCount: o.stationCount, subscription: subscriptionView(o, pricing) })),
         stations: [...stations.values()],
         limits: { maxStations: MAX_STATIONS_PER_ORG },
-        pricing: { ...pricing, paymentsEnabled: flutterwave.enabled },
+        pricing: { ...pricing, paymentsEnabled: flutterwave.enabled, autoRenewAvailable },
       });
     })
   );

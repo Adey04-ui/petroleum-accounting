@@ -3,10 +3,12 @@
 
 export const ROLES = ['owner', 'manager', 'attendant'];
 
+// editExistingDays: may change a day that has already been saved. Staff can only add a NEW day; once it is saved,
+// only an owner can correct it (and only an owner can set a day's own tolerance allowance).
 export const PERMISSIONS = {
-  attendant: { enterDays: true, enterDeliveries: false, seeCost: false, admin: false },
-  manager: { enterDays: true, enterDeliveries: true, seeCost: false, admin: false },
-  owner: { enterDays: true, enterDeliveries: true, seeCost: true, admin: true },
+  attendant: { enterDays: true, enterDeliveries: false, editExistingDays: false, seeCost: false, admin: false },
+  manager: { enterDays: true, enterDeliveries: true, editExistingDays: false, seeCost: false, admin: false },
+  owner: { enterDays: true, enterDeliveries: true, editExistingDays: true, seeCost: true, admin: true },
 };
 
 export const can = (role, what) => Boolean(PERMISSIONS[role]?.[what]);
@@ -14,11 +16,11 @@ export const can = (role, what) => Boolean(PERMISSIONS[role]?.[what]);
 const omit = (obj, keys) => Object.fromEntries(Object.entries(obj).filter(([k]) => !keys.includes(k)));
 
 const PRODUCT_COST_FIELDS = [
-  'unitCost', 'replacementCost', 'costOfGoodsSold', 'priceMargin', 'toleranceMargin',
+  'transferCost', 'unitCost', 'replacementCost', 'costOfGoodsSold', 'priceMargin', 'toleranceMargin',
   'profit', 'priceChangeGain', 'normalProfit', 'stockAverageCost', 'stockValue',
 ];
 const SUMMARY_PRODUCT_COST_FIELDS = [
-  'costOfGoodsSold', 'priceMargin', 'toleranceMargin', 'profit', 'priceChangeGain', 'closingStockValue',
+  'transferCost', 'costOfGoodsSold', 'priceMargin', 'toleranceMargin', 'profit', 'priceChangeGain', 'closingStockValue',
 ];
 const SUMMARY_COST_FIELDS = [
   'profitBeforeExpenses', 'adjustments', 'totalExpenses', 'profitAfterExpenses', 'priceChangeGain', 'normalProfit',

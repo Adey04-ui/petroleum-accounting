@@ -25,8 +25,15 @@ model User {
 model Organisation {
   id        String     @id @default(cuid())
   name      String
-  status    String     @default("active") // 'active' | 'suspended'
+  status    String     @default("active") // 'active' | 'suspended' (suspended by the platform admin)
   paymentId String?    @unique
+  // Subscription: paid up to this moment. After it there is a 7-day grace period, then the organisation is
+  // read-only until it renews. NULL = no expiry (organisations created before subscriptions existed).
+  paidUntil DateTime?
+  // Set when the organisation pays with Flutterwave's automatic-renewal plan: the payer's email, because
+  // Flutterwave subscriptions (and their renewal webhooks) are identified by email. Only ONE organisation
+  // per email may have automatic renewal on.
+  autoRenewEmail String?
   createdAt DateTime   @default(now())
   payment   Payment?   @relation(fields: [paymentId], references: [id])
   owners    OrgOwner[]
@@ -85,6 +92,7 @@ model DayEntry {
   stationId   String
   date        String   // YYYY-MM-DD
   data        Json
+  version     Int      @default(1) // goes up on every save; lets an offline phone detect that someone else edited the day
   updatedById Int?
   updatedAt   DateTime @updatedAt
   station     Station  @relation(fields: [stationId], references: [id], onDelete: Cascade)
@@ -95,17 +103,21 @@ model DayEntry {
 model Payment {
   id               String        @id @default(cuid())
   txRef            String        @unique
-  userId           Int
+  userId           Int?          // null only for a renewal charge we could not match to anyone
   organisationName String
   amount           Int
   currency         String
-  status           String        @default("pending") // 'pending' | 'successful' | 'failed'
+  kind             String        @default("signup") // 'signup' (creates the organisation) | 'renewal' (extends it)
+  organisationId   String?       // for renewals: which organisation
+  withPlan         Boolean       @default(false)    // paid through the automatic-renewal plan
+  status           String        @default("pending") // 'pending' | 'successful' | 'failed' | 'unmatched'
   flwTransactionId String?
   createdAt        DateTime      @default(now())
-  user             User          @relation(fields: [userId], references: [id])
+  user             User?         @relation(fields: [userId], references: [id])
   organisation     Organisation?
 
   @@index([userId])
+  @@index([organisationId])
 }
 
 // Failed-login and sign-up attempt counters. In the database (not in memory) so the limit holds across

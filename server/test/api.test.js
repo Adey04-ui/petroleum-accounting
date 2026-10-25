@@ -5,7 +5,7 @@ import { createFakeFlutterwave } from '../src/fakeFlutterwave.js';
 import { storeKinds, makeStore } from './helpers.js';
 import { config as octConfig, days as octDays } from './engine/october.fixture.js';
 
-const PRICE = { amount: 15000, currency: 'NGN' };
+const PRICE = { amount: 15000, currency: 'NGN', interval: 'yearly' };
 const stationConfig = {
   costingMethod: 'WAC',
   pms: { pumps: ['1A', '2A'], openingStock: 5100, openingCostPerLitre: 1351, toleranceRate: 0.04 },
@@ -251,12 +251,14 @@ describe.each(storeKinds)('API (%s store)', (kind) => {
     });
 
     it('a manager enters days and sees cash and tolerance but no cost or profit', async () => {
-      let r;
+      const saved = [];
       for (let i = 0; i < 3; i++) {
-        r = await api('PUT', S(stA1, `/days/2026-10-0${i + 1}`), { token: staff, body: dayBody(i) });
+        const r = await api('PUT', S(stA1, `/days/2026-10-0${i + 1}`), { token: staff, body: dayBody(i) });
         expect(r.status).toBe(200);
+        expect(r.body.version).toBe(1);
+        saved.push(r.body.day);
       }
-      const first = (await api('PUT', S(stA1, '/days/2026-10-01'), { token: staff, body: dayBody(0) })).body.day;
+      const first = saved[0];
       expect(first.pms.pumpSales).toBeCloseTo(320.96, 2);
       expect(first.banking.cashToLodge).toBeCloseTo(-97065.6, 2);
       expect(first.pms.profit).toBeUndefined();
@@ -304,19 +306,22 @@ describe.each(storeKinds)('API (%s store)', (kind) => {
       expect(r.body.day.pms.priceChangeGain).toBeGreaterThan(0);
 
       const view = (await api('GET', S(stA1, '/days/2026-10-04'), { token: staff })).body.entry;
-      expect(view.pms.deliveries[0].costPerLitre).toBeUndefined();
-      await api('PUT', S(stA1, '/days/2026-10-04'), { token: staff, body: view });
+      expect(view.pms.deliveries[0].costPerLitre).toBeUndefined(); // cost prices never reach staff
       expect((await api('GET', S(stA1, '/days?month=2026-10'), { token: ownerA })).body.missingCosts).toEqual([]);
     });
 
-    it('an attendant cannot change deliveries and cannot set up the station', async () => {
+    it('only the owner can change a day that is already saved', async () => {
       const ade = await api('POST', `/api/organisations/${orgA.id}/members`, { token: ownerA, body: { name: 'Ade', email: 'ade2@test.com', password: 'password123', assignments: [{ stationId: stA1.id, role: 'attendant' }] } });
       expect(ade.status).toBe(201);
       const t = await login('ade2@test.com');
       const view = (await api('GET', S(stA1, '/days/2026-10-04'), { token: t })).body.entry;
-      view.pms.deliveries = [];
-      const r = await api('PUT', S(stA1, '/days/2026-10-04'), { token: t, body: view });
-      expect(r.body.day.pms.received).toBe(10000);
+      for (const token of [t, staff]) {
+        const r = await api('PUT', S(stA1, '/days/2026-10-04'), { token, body: view });
+        expect(r.status).toBe(403);
+        expect(r.body.code).toBe('OWNER_ONLY_EDIT');
+      }
+      expect((await api('DELETE', S(stA1, '/days/2026-10-04'), { token: staff })).status).toBe(403);
+      expect((await api('GET', S(stA1, '/days/2026-10-04'), { token: ownerA })).body.result.pms.received).toBe(10000); // untouched
       expect((await api('PUT', S(stA1, '/config'), { token: t, body: stationConfig })).status).toBe(403);
       expect((await api('GET', S(stA1, '/export?month=2026-10'), { token: t })).status).toBe(403);
     });

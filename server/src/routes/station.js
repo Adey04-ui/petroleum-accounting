@@ -1,15 +1,21 @@
 // Everything inside one station: setup, daily entry, results, Excel export.
 import express from 'express';
-import { summarise } from '../engine/index.js';
+import { summarise, productTanks } from '../engine/index.js';
 import { buildWorkbook } from '../exportXlsx.js';
-import { HttpError, wrap, isNum, checkDate, checkMonth } from '../http.js';
+import { HttpError, wrap, isNum, toNum, checkDate, checkMonth } from '../http.js';
 import { PERMISSIONS, can, redactDay, redactSummary, redactEntry } from '../permissions.js';
 import { PRODUCTS, sanitizeDay, sanitizeConfig, computeAll, checkEntries } from '../stationLogic.js';
-import { needPermission } from '../middleware.js';
+import { needPermission, EXPIRED_MESSAGE } from '../middleware.js';
 
 export function stationRoutes(store) {
   const r = express.Router({ mergeParams: true });
   const need = needPermission;
+
+  // Once the subscription (and its grace period) has run out, everything can be read and downloaded but nothing changed.
+  r.use((req, res, next) => {
+    if (req.method !== 'GET' && req.subscription === 'expired') return next(new HttpError(402, EXPIRED_MESSAGE, { code: 'SUBSCRIPTION_EXPIRED' }));
+    next();
+  });
 
   r.get(
     '/meta',
@@ -17,16 +23,27 @@ export function stationRoutes(store) {
       const config = await store.getSetting(req.station.id, 'config');
       const products = {};
       for (const p of PRODUCTS) {
-        if (config?.[p]) products[p] = { pumps: config[p].pumps, openingStock: config[p].openingStock };
+        if (!config?.[p]) continue;
+        const tanks = productTanks(config[p]);
+        products[p] = {
+          pumps: config[p].pumps,
+          tanks: tanks.map((t) => ({ id: t.id, name: t.name })),
+          openingStock: tanks.reduce((s, t) => s + t.openingStock, 0),
+          toleranceRate: config[p].toleranceRate ?? 0,
+        };
       }
+      const owner = can(req.role, 'seeCost');
       res.json({
         user: { id: req.user.id, name: req.user.name, email: req.user.email },
         role: req.role,
         permissions: PERMISSIONS[req.role],
         configured: Boolean(config),
         products,
+        carryBalance: Boolean(config?.carryBalance),
+        paymentChannels: config?.paymentChannels ?? [],
         station: { id: req.station.id, name: req.station.name },
         organisation: { id: req.org.id, name: req.org.name },
+        subscription: { state: req.subscription, ...(owner ? { paidUntil: req.org.paidUntil ?? null, autoRenew: Boolean(req.org.autoRenewEmail) } : {}) },
       });
     })
   );
@@ -67,7 +84,7 @@ export function stationRoutes(store) {
     })
   );
 
-  // ---- one day: read (with context for the form)
+  // ---- one day: read (with what the entry form needs from the days before it)
   r.get(
     '/days/:date',
     wrap(async (req, res) => {
@@ -82,8 +99,18 @@ export function stationRoutes(store) {
       const previous = { date: before[0]?.date ?? null };
       for (const p of PRODUCTS) {
         if (!config[p]) continue;
+        const tanks = productTanks(config[p]);
+        const last = before.find((e) => e.data[p]);
+        const tankClose = Object.fromEntries(
+          tanks.map((t) => {
+            const d = last?.data[p];
+            const v = d?.tankClosings?.[t.id] ?? (tanks.length === 1 ? d?.closingStock : undefined);
+            return [t.id, isNum(v) ? v : t.openingStock];
+          })
+        );
         previous[p] = {
-          closingStock: before[0]?.data[p]?.closingStock ?? null,
+          tankClose,
+          closingStock: Object.values(tankClose).reduce((s, v) => s + v, 0),
           sellingPrice: before.find((e) => e.data[p]?.sellingPrice)?.data[p].sellingPrice ?? null,
           pumpClose: Object.fromEntries(
             config[p].pumps.map((id) => {
@@ -94,10 +121,21 @@ export function stationRoutes(store) {
         };
       }
 
-      const entry = entries.find((e) => e.date === date)?.data ?? null;
-      let result = null;
-      if (entry) result = (await computeAll(store, sid)).results.find((x) => x.date === date) ?? null;
-      res.json({ date, entry: redactEntry(entry, req.role), previous, result: redactDay(result, req.role) });
+      const existing = entries.find((e) => e.date === date);
+      const { results } = entries.length ? await computeAll(store, sid) : { results: [] };
+      const result = existing ? results.find((x) => x.date === date) ?? null : null;
+      if (config.carryBalance) {
+        const prior = [...results].reverse().find((x) => x.date < date);
+        previous.balance = prior ? prior.banking.availableBalance : 0;
+      }
+      const stored = existing ? await store.getDay(sid, date) : null;
+      res.json({
+        date,
+        entry: redactEntry(existing?.data ?? null, req.role),
+        version: stored?.version ?? 0,
+        previous,
+        result: redactDay(result, req.role),
+      });
     })
   );
 
@@ -113,8 +151,15 @@ export function stationRoutes(store) {
       const config = await store.getSetting(sid, 'config');
       if (!config) throw new HttpError(409, 'This station has not been set up yet');
 
+      const existingDay = await store.getDay(sid, date);
+      // Staff can add a day; once it is saved only an owner can correct it.
+      if (existingDay && !can(role, 'editExistingDays')) {
+        throw new HttpError(403, 'This day has already been saved. Only the owner can change it.', { code: 'OWNER_ONLY_EDIT' });
+      }
+
       const data = sanitizeDay(req.body ?? {});
-      const existing = (await store.getDay(sid, date))?.data;
+      const baseVersion = toNum(req.body?.baseVersion, 'baseVersion');
+      const existing = existingDay?.data;
 
       for (const p of PRODUCTS) {
         if (!data[p]) continue;
@@ -128,11 +173,12 @@ export function stationRoutes(store) {
         } else if (!can(role, 'seeCost')) {
           // cost prices are owner-only: keep what the owner already entered
           data[p].deliveries = data[p].deliveries.map((d) => ({
-            litres: d.litres,
+            ...d,
             costPerLitre: old?.deliveries?.find((o) => o.litres === d.litres)?.costPerLitre ?? null,
           }));
         }
         if (!can(role, 'seeCost')) data[p].replacementCost = old?.replacementCost;
+        if (!can(role, 'admin')) data[p].toleranceRate = old?.toleranceRate; // a day's own tolerance allowance is the owner's call
       }
 
       const entries = (await store.listDays(sid)).filter((e) => e.date !== date);
@@ -140,9 +186,16 @@ export function stationRoutes(store) {
       entries.sort((a, b) => (a.date < b.date ? -1 : 1));
       checkEntries(config, entries);
 
-      await store.upsertDay(sid, date, data, req.user.id);
+      const saved = await store.saveDay(sid, date, data, req.user.id, baseVersion);
+      if (saved.conflict) {
+        throw new HttpError(409, 'Someone else changed this day while you were working on it.', {
+          code: 'CONFLICT',
+          version: saved.current?.version ?? 0,
+          entry: redactEntry(saved.current?.data ?? null, role),
+        });
+      }
       const result = (await computeAll(store, sid)).results.find((x) => x.date === date);
-      res.json({ day: redactDay(result, role), warnings: result.warnings });
+      res.json({ day: redactDay(result, role), warnings: result.warnings, version: saved.version });
     })
   );
 

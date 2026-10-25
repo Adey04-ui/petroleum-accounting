@@ -195,3 +195,17 @@ export function Sheet({ title, onClose, children, leading }) {
     document.body
   );
 }
+
+export function Select({ label, value, onChange, options, hint }) {
+  return (
+    <label className="field">
+      {label}
+      <select value={value ?? ''} onChange={(e) => onChange(e.target.value)}>
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+      {hint && <span className="hint">{hint}</span>}
+    </label>
+  );
+}

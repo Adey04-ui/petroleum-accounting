@@ -6,7 +6,7 @@ import Entry from './Entry.jsx';
 import Results from './Results.jsx';
 import Settings from './Settings.jsx';
 
-export default function Station({ stationId, me, go }) {
+export default function Station({ stationId, me, go, date }) {
   const [meta, setMeta] = useState(null);
   const [error, setError] = useState(null);
   const [tab, setTab] = useState('entry');
@@ -49,10 +49,17 @@ export default function Station({ stationId, me, go }) {
 
       <div className="tabs"><Segmented label="Sections" options={tabs} value={tab} onChange={setTab} /></div>
 
+      {meta.subscription?.state === 'grace' && (
+        <div className="msg warn">The organisation's subscription has ended. Everything still works for a few more days. {admin ? 'Renew it from the organisation page.' : 'Please tell the owner.'}</div>
+      )}
+      {meta.subscription?.state === 'expired' && (
+        <div className="msg error">The organisation's subscription has ended, so changes are switched off. You can still look at everything. {admin ? 'Renew it from the organisation page.' : 'Please tell the owner.'}</div>
+      )}
+      {meta.offline && <div className="msg warn">You are offline. Showing what this phone last saw.</div>}
       {!meta.configured && !admin && <div className="msg warn">This station has not been set up yet. Ask the owner to finish the setup.</div>}
       {!meta.configured && admin && tab !== 'settings' && <div className="msg warn">Finish setting up this station in Settings first.</div>}
 
-      {meta.configured && tab === 'entry' && <Entry meta={meta} />}
+      {meta.configured && tab === 'entry' && <Entry meta={meta} initialDate={date} />}
       {meta.configured && tab === 'results' && <Results meta={meta} />}
       {admin && tab === 'settings' && <Settings meta={meta} onSaved={load} />}
 

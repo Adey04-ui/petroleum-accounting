@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { Field, ErrorBox, Chevron, Sheet, Segmented, Switch } from '../ui.jsx';
-import { ROLE_NAMES } from '../format.js';
+import { ROLE_NAMES, money, dateLong, PERIOD } from '../format.js';
+import { redirect } from '../nav.js';
 
 function StationForm({ orgId, station, onSaved, close }) {
   const [name, setName] = useState(station?.name ?? '');
@@ -169,6 +170,63 @@ function MemberForm({ orgId, member, stations, onSaved, close }) {
   );
 }
 
+function RenewForm({ orgId, sub, canAuto }) {
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(null);
+  const period = PERIOD[sub.interval];
+
+  async function pay(auto) {
+    setBusy(auto ? 'auto' : 'once');
+    setError(null);
+    try {
+      const { link } = await api.renew(orgId, auto);
+      redirect(link);
+    } catch (err) {
+      setError(err);
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div>
+      <div className="card">
+        <div className="stat"><span>One {period}</span><b>{money(sub.amount, sub.currency)}</b></div>
+        <p className="footnote" style={{ margin: '0.5rem 0 0' }}>A new {period} is added to what is left, so paying early loses nothing.</p>
+      </div>
+      <ErrorBox error={error} />
+      <button className="btn block" disabled={Boolean(busy)} onClick={() => pay(false)}>{busy === 'once' ? 'Opening Flutterwave…' : `Pay for another ${period} (card, transfer or USSD)`}</button>
+      {canAuto && (
+        <>
+          <div style={{ height: '0.625rem' }} />
+          <button className="btn ghost block" disabled={Boolean(busy)} onClick={() => pay(true)}>{busy === 'auto' ? 'Opening Flutterwave…' : `Pay and renew automatically every ${period} (card)`}</button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function SubscriptionCard({ sub, onRenew }) {
+  if (!sub.paidUntil) return null;
+  const period = PERIOD[sub.interval];
+  const when = dateLong(sub.paidUntil);
+  return (
+    <>
+      <div className="section-title">Subscription</div>
+      <div className="card">
+        {sub.state === 'active' && <div className="stat"><span>Paid until</span><b>{when}</b></div>}
+        {sub.state === 'grace' && <div className="msg warn" style={{ margin: 0 }}>The subscription ended on {when}. Everything still works for a few more days, then the organisation becomes read-only. Please renew.</div>}
+        {sub.state === 'expired' && <div className="msg error" style={{ margin: 0 }}>The subscription ended on {when}. The organisation is read-only: you can look at everything and download Excel, but cannot make changes until you renew.</div>}
+        <p className="footnote" style={{ margin: '0.6rem 0 0.75rem' }}>
+          {sub.autoRenew
+            ? `Renews automatically every ${period} (${money(sub.amount, sub.currency)}). Flutterwave emails you before each charge; you can cancel from that email.`
+            : `Does not renew by itself. ${money(sub.amount, sub.currency)} per ${period}.`}
+        </p>
+        {!sub.autoRenew && <button className={`btn ${sub.state === 'active' && sub.daysLeft > 30 ? 'ghost' : ''} block`} onClick={onRenew}>Renew subscription</button>}
+      </div>
+    </>
+  );
+}
+
 function RenameForm({ org, onSaved, close }) {
   const [name, setName] = useState(org.name);
   const [error, setError] = useState(null);
@@ -191,7 +249,7 @@ function RenameForm({ org, onSaved, close }) {
   );
 }
 
-export default function Org({ orgId, go, refreshMe }) {
+export default function Org({ orgId, go, refreshMe, me }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [sheet, setSheet] = useState(null);
@@ -215,7 +273,7 @@ export default function Org({ orgId, go, refreshMe }) {
   if (error) return <div className="page"><ErrorBox error={error} /></div>;
   if (!data) return <div className="page muted">Loading…</div>;
 
-  const { organisation, stations, members, limits } = data;
+  const { organisation, stations, members, limits, subscription } = data;
   const byId = Object.fromEntries(stations.map((s) => [s.id, s]));
   const atLimit = stations.length >= limits.maxStations;
   const suspended = organisation.status !== 'active';
@@ -230,6 +288,8 @@ export default function Org({ orgId, go, refreshMe }) {
         <button className="linkbtn" style={{ padding: 0 }} onClick={() => setSheet({ type: 'org' })}>Rename</button>
       </p>
       {suspended && <div className="msg warn">This organisation is suspended, so changes are switched off. Please contact support.</div>}
+
+      <SubscriptionCard sub={subscription} onRenew={() => setSheet({ type: 'renew' })} />
 
       <div className="section-title">Stations</div>
       <div className="list">
@@ -273,6 +333,11 @@ export default function Org({ orgId, go, refreshMe }) {
       {sheet?.type === 'member' && (
         <Sheet title={sheet.member ? 'Roles' : 'New person'} onClose={() => setSheet(null)}>
           {(close) => <MemberForm orgId={orgId} member={sheet.member} stations={stations} onSaved={saved} close={close} />}
+        </Sheet>
+      )}
+      {sheet?.type === 'renew' && (
+        <Sheet title="Renew" onClose={() => setSheet(null)}>
+          {() => <RenewForm orgId={orgId} sub={subscription} canAuto={Boolean(me?.pricing?.autoRenewAvailable)} />}
         </Sheet>
       )}
       {sheet?.type === 'org' && (

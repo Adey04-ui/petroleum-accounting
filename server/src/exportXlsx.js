@@ -7,6 +7,8 @@ const MONEY = '#,##0.00;[Red]-#,##0.00';
 const PRODUCT_COLUMNS = [
   ['pumpSales', 'Pump litres', true],
   ['tankSales', 'Tank litres', true],
+  ['rtt', 'Return to tank (L)', true],
+  ['transferredOut', 'Transferred out (L)', true],
   ['expectedTolerance', 'Expected tolerance', true],
   ['actualTolerance', 'Actual tolerance', true],
   ['toleranceVariance', 'Variance', true],
@@ -33,7 +35,10 @@ export async function buildWorkbook({ month, days, summary }) {
       addUp.push(sum);
     }
   }
-  for (const [heading, sum] of [['Expected cash', true], ['Expenses', true], ['POS', true], ['Transfer', true], ['Cash to lodge', true], ['Total profit (all products)', true]]) {
+  for (const [heading, sum] of [
+    ['Total sales', true], ['Previous balance', false], ['Card / POS / transfer payments', true], ['Credit sales', true], ['Credit received', true],
+    ['Banked', true], ['Expenses', true], ['Available balance', false], ['Total profit (all products)', true],
+  ]) {
     header.push(heading);
     addUp.push(sum);
   }
@@ -49,7 +54,7 @@ export async function buildWorkbook({ month, days, summary }) {
       }
     }
     const b = d.banking;
-    row.push(b.expectedCash, b.expenses, b.pos, b.transfer, b.cashToLodge, d.profit);
+    row.push(b.expectedCash, b.previousBalance, b.nonCash, b.creditSales, b.creditReceived, b.banked, b.expenses, b.availableBalance, d.profit);
     return row;
   });
 

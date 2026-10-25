@@ -25,7 +25,7 @@ export function createFlutterwave({ secretKey, baseUrl = 'https://api.flutterwav
     enabled: Boolean(secretKey),
 
     /** Returns { link } - send the customer there to pay. */
-    async initiate({ txRef, amount, currency, redirectUrl, customer, title, description, meta }) {
+    async initiate({ txRef, amount, currency, redirectUrl, customer, title, description, meta, paymentPlan }) {
       const data = await call('/v3/payments', {
         method: 'POST',
         body: JSON.stringify({
@@ -36,15 +36,23 @@ export function createFlutterwave({ secretKey, baseUrl = 'https://api.flutterwav
           customer,
           customizations: { title, description },
           meta,
+          // With a plan, Flutterwave takes the card payment now and charges the card again every period.
+          ...(paymentPlan ? { payment_plan: paymentPlan } : {}),
         }),
       });
       return { link: data.link };
     },
 
+    /** Creates the recurring plan once (see `npm run create-plan`). Returns { id }. */
+    async createPlan({ name, amount, interval, currency }) {
+      const data = await call('/v3/payment-plans', { method: 'POST', body: JSON.stringify({ name, amount, interval, currency }) });
+      return { id: data.id };
+    },
+
     /** Looks the transaction up at Flutterwave. Never trust the redirect or webhook alone. */
     async verify(transactionId) {
       const d = await call(`/v3/transactions/${encodeURIComponent(transactionId)}/verify`);
-      return { id: d.id, txRef: d.tx_ref, status: d.status, amount: d.amount, currency: d.currency, email: d.customer?.email };
+      return { id: d.id, txRef: d.tx_ref, status: d.status, amount: d.amount, currency: d.currency, email: d.customer?.email?.toLowerCase() };
     },
   };
 }

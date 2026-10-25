@@ -26,7 +26,7 @@ export default function PaymentReturn({ params, onDone, onRetry }) {
       .then((r) => {
         if (!live) return;
         if (r.status === 'successful') haptic(15);
-        setState({ phase: r.status, organisation: r.organisation });
+        setState({ phase: r.status, organisation: r.organisation, kind: r.kind });
       })
       .catch((e) => live && setState({ phase: 'error', message: e.message }));
     return () => {
@@ -50,8 +50,10 @@ export default function PaymentReturn({ params, onDone, onRetry }) {
               <motion.div className="check" initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={SPRING}>
                 <Tick />
               </motion.div>
-              <div className="big">Payment confirmed</div>
-              <p style={{ margin: '0 0 1.1rem' }}>{state.organisation.name} is ready. Add your stations and your staff next.</p>
+              <div className="big">{state.kind === 'renewal' ? 'Subscription renewed' : 'Payment confirmed'}</div>
+              <p style={{ margin: '0 0 1.1rem' }}>
+                {state.kind === 'renewal' ? `${state.organisation.name} is paid up again.` : `${state.organisation.name} is ready. Add your stations and your staff next.`}
+              </p>
               <button className="btn" onClick={() => onDone(state.organisation)}>Open your dashboard</button>
             </>
           )}

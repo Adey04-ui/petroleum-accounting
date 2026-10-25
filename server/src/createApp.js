@@ -16,7 +16,8 @@ import { platformRoutes } from './routes/platform.js';
  * @param flutterwave  a client from createFlutterwave() (tests pass a fake one)
  * @param webhookHash  the "secret hash" you set in the Flutterwave dashboard for webhooks
  * @param webUrl       where the web app lives (Flutterwave sends the customer back here)
- * @param pricing      { amount, currency } charged once per organisation
+ * @param pricing      { amount, currency, interval } what one billing period costs ('yearly' or 'monthly')
+ * @param planId       Flutterwave payment-plan id; when set, customers can pay once and be charged automatically each period
  */
 export function createApp(
   store,
@@ -26,12 +27,14 @@ export function createApp(
     flutterwave = createFlutterwave({}),
     webhookHash,
     webUrl = 'http://localhost:5173',
-    pricing = { amount: 10000, currency: 'NGN' },
+    pricing = { amount: 120000, currency: 'NGN', interval: 'yearly' },
+    planId,
     loginLimit = 10,
   } = {}
 ) {
   if (!jwtSecret) throw new Error('jwtSecret is required');
   if (!Number.isInteger(pricing.amount) || pricing.amount <= 0) throw new Error('pricing.amount must be a whole number above 0');
+  if (!['yearly', 'monthly'].includes(pricing.interval)) throw new Error("pricing.interval must be 'yearly' or 'monthly'");
 
   const app = express();
   app.set('trust proxy', 1); // behind Render/Railway/Vercel, so rate limits see the real client address
@@ -41,11 +44,11 @@ export function createApp(
   const auth = createAuth(store, jwtSecret);
 
   app.get('/api/health', (req, res) => res.json({ ok: true }));
-  app.use('/api', authRoutes({ store, jwtSecret, auth, pricing, flutterwave, loginLimit }));
-  app.use('/api/billing', billingRoutes({ store, auth, flutterwave, pricing, webUrl: webUrl.replace(/\/$/, ''), webhookHash }));
-  app.use('/api/organisations/:orgId', organisationRoutes({ store, auth }));
+  app.use('/api', authRoutes({ store, jwtSecret, auth, pricing, flutterwave, loginLimit, autoRenewAvailable: Boolean(planId) }));
+  app.use('/api/billing', billingRoutes({ store, auth, flutterwave, pricing, planId, webUrl: webUrl.replace(/\/$/, ''), webhookHash }));
+  app.use('/api/organisations/:orgId', organisationRoutes({ store, auth, pricing }));
   app.use('/api/stations/:stationId', auth, createStationContext(store), stationRoutes(store));
-  app.use('/api/platform', platformRoutes({ store, auth }));
+  app.use('/api/platform', platformRoutes({ store, auth, pricing }));
 
   app.use((err, req, res, next) => {
     if (err instanceof ValidationError) return res.status(422).json({ error: 'These numbers do not add up', errors: err.errors });

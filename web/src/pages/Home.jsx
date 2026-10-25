@@ -2,6 +2,14 @@ import React from 'react';
 import { Chevron } from '../ui.jsx';
 import { ROLE_NAMES } from '../format.js';
 
+const subPill = (sub) => {
+  if (!sub) return null;
+  if (sub.state === 'expired') return <span className="pill warn">Ended</span>;
+  if (sub.state === 'grace') return <span className="pill warn">Ended, grace</span>;
+  if (!sub.autoRenew && sub.daysLeft !== null && sub.daysLeft <= 30) return <span className="pill warn">{sub.daysLeft} days left</span>;
+  return null;
+};
+
 export default function Home({ me, go }) {
   const { stations, organisations, user } = me;
   const none = stations.length === 0 && organisations.length === 0;
@@ -50,7 +58,7 @@ export default function Home({ me, go }) {
                   <span className="t1">{o.name}</span>
                   <span className="t2">{o.stationCount} of {me.limits.maxStations} stations · staff and roles</span>
                 </span>
-                {o.status !== 'active' && <span className="pill warn">Suspended</span>}
+                {o.status !== 'active' ? <span className="pill warn">Suspended</span> : subPill(o.subscription)}
                 <Chevron />
               </button>
             ))}

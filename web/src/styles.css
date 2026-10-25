@@ -239,3 +239,19 @@ th { color: var(--label-2); font-weight: 500; font-size: 0.75rem; letter-spacing
 .destructive { margin-top: 1.5rem; padding-top: 1rem; border-top: 0.5px solid var(--separator); }
 .destructive h3 { margin-top: 0; color: var(--negative); }
 .btn.ghost.danger { background: var(--fill); color: var(--negative); }
+
+/* ---------- Entry form extras ---------- */
+.pump { padding: 0.6rem 0; }
+.pump + .pump { border-top: 0.5px solid var(--separator); }
+.pump .head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.4rem; font-weight: 600; letter-spacing: -0.01em; }
+.pump .head small { font-weight: 400; color: var(--label-2); font-size: 0.8125rem; }
+.line { display: grid; grid-template-columns: 1fr auto; gap: 0.5rem; align-items: end; margin-bottom: 0.5rem; }
+.line.three { grid-template-columns: 1fr 1fr auto; }
+.line.four { grid-template-columns: 1fr 1fr 1fr auto; }
+@media (max-width: 34rem) { .line.three, .line.four { grid-template-columns: 1fr 1fr; } .line .linkbtn { justify-self: start; } }
+.sync { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.8125rem; font-weight: 600; padding: 0.25rem 0.65rem; border-radius: 999px; border: 0; background: color-mix(in srgb, var(--caution) 16%, transparent); color: var(--caution); }
+.sync .dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: currentColor; }
+.sync.bad { background: color-mix(in srgb, var(--negative) 14%, transparent); color: var(--negative); }
+.sync:active { opacity: 0.55; }
+.live { border: 1px dashed var(--separator); }
+.banner { display: flex; gap: 0.75rem; align-items: center; justify-content: space-between; flex-wrap: wrap; }

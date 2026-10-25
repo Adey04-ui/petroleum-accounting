@@ -4,8 +4,9 @@ import bcrypt from 'bcryptjs';
 import { HttpError, wrap, cleanName } from '../http.js';
 import { MAX_STATIONS_PER_ORG, STATION_ROLES } from '../limits.js';
 import { createOrgContext } from '../middleware.js';
+import { subscriptionView } from './billing.js';
 
-export function organisationRoutes({ store, auth }) {
+export function organisationRoutes({ store, auth, pricing }) {
   const r = express.Router({ mergeParams: true });
   const readCtx = createOrgContext(store, { allowSuspended: true });
   const writeCtx = createOrgContext(store);
@@ -64,6 +65,7 @@ export function organisationRoutes({ store, auth }) {
       const stations = await store.listStations(req.org.id);
       res.json({
         organisation: { id: req.org.id, name: req.org.name, status: req.org.status },
+        subscription: subscriptionView(req.org, pricing),
         stations: stations.map(stationView),
         members: await members(req.org.id),
         limits: { maxStations: MAX_STATIONS_PER_ORG },

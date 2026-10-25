@@ -11,7 +11,8 @@
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
     "seed": "node src/seed.js",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "create-plan": "node src/create-plan.js"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.1",

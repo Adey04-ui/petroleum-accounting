@@ -16,7 +16,7 @@ const manager = await user('Demo Manager', 'manager@example.com');
 const attendant = await user('Demo Attendant', 'attendant@example.com');
 
 await store.createPayment({ txRef: 'demo', userId: owner.id, organisationName: 'Demo Fuels', amount: 1, currency: 'NGN' });
-const { organisation } = await store.fulfilPayment('demo', 'demo');
+const { organisation } = await store.fulfilPayment('demo', 'demo', { interval: 'yearly' });
 const north = await store.createStation({ organisationId: organisation.id, name: 'Ikeja Station', address: 'Ikeja, Lagos', max: 5 });
 await store.createStation({ organisationId: organisation.id, name: 'Ijebu Station', address: 'Ijebu-Ode', max: 5 });
 await store.setStationRole(manager.id, north.id, 'manager');
@@ -27,7 +27,7 @@ createApp(store, {
   jwtSecret: 'local-tryout-secret-local-tryout',
   flutterwave: createFakeFlutterwave(),
   webUrl: process.env.WEB_URL ?? 'http://localhost:5173',
-  pricing: { amount: 10000, currency: 'NGN' },
+  pricing: { amount: 120000, currency: 'NGN', interval: 'yearly' },
 }).listen(port, () => {
   console.log(`Tryout API on http://localhost:${port} (data is NOT saved, payments are fake)`);
   console.log(`Password for all: ${password}`);

@@ -1,8 +1,18 @@
+import { kvGet, kvSet } from './offline.js';
+
 const BASE = import.meta.env.VITE_API_URL ?? '';
 const KEY = 'station-token';
 
 export const getToken = () => localStorage.getItem(KEY);
 export const setToken = (t) => (t ? localStorage.setItem(KEY, t) : localStorage.removeItem(KEY));
+
+/** The request never reached the server (no signal, server asleep, address wrong). */
+export class NetworkError extends Error {
+  constructor() {
+    super('No internet connection');
+    this.name = 'NetworkError';
+  }
+}
 
 export class ApiError extends Error {
   constructor(status, data) {
@@ -10,15 +20,21 @@ export class ApiError extends Error {
     this.status = status;
     this.code = data?.code;
     this.errors = data?.errors ?? [];
+    this.data = data;
   }
 }
 
-async function request(method, path, body) {
-  const res = await fetch(BASE + path, {
-    method,
-    headers: { 'Content-Type': 'application/json', ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}) },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+export async function request(method, path, body) {
+  let res;
+  try {
+    res = await fetch(BASE + path, {
+      method,
+      headers: { 'Content-Type': 'application/json', ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    throw new NetworkError();
+  }
   let data = null;
   try {
     data = await res.json();
@@ -34,17 +50,36 @@ let stationId = null;
 export const setStation = (id) => {
   stationId = id;
 };
+export const currentStation = () => stationId;
 const st = (path) => `/api/stations/${stationId}${path}`;
 const org = (id, path = '') => `/api/organisations/${id}${path}`;
+
+/**
+ * A read that remembers its answer on the phone. With no signal it returns the last answer it saw
+ * (marked `offline: true`) instead of failing.
+ */
+async function cachedRead(key, fn) {
+  try {
+    const fresh = await fn();
+    await kvSet(key, fresh);
+    return fresh;
+  } catch (e) {
+    if (!(e instanceof NetworkError)) throw e;
+    const old = await kvGet(key);
+    if (old === undefined) throw e;
+    return { ...old, offline: true };
+  }
+}
 
 export const api = {
   // accounts
   register: (name, email, password) => request('POST', '/api/auth/register', { name, email, password }),
   login: (email, password) => request('POST', '/api/auth/login', { email, password }),
-  me: () => request('GET', '/api/me'),
+  me: () => cachedRead('me', () => request('GET', '/api/me')),
 
-  // paying for an organisation
-  checkout: (organisationName) => request('POST', '/api/billing/checkout', { organisationName }),
+  // paying for an organisation (and renewing it)
+  checkout: (organisationName, autoRenew) => request('POST', '/api/billing/checkout', { organisationName, autoRenew }),
+  renew: (organisationId, autoRenew) => request('POST', '/api/billing/renew', { organisationId, autoRenew }),
   verifyPayment: (params) => request('GET', `/api/billing/verify?${new URLSearchParams(params)}`),
 
   // organisation dashboard (owners)
@@ -60,13 +95,25 @@ export const api = {
   // platform admin
   platformOrgs: () => request('GET', '/api/platform/organisations'),
   setOrgStatus: (id, status) => request('PUT', `/api/platform/organisations/${id}`, { status }),
+  setPaidUntil: (id, paidUntil) => request('PUT', `/api/platform/organisations/${id}/paid-until`, { paidUntil }),
+  unmatchedPayments: () => request('GET', '/api/platform/payments/unmatched'),
+  assignPayment: (txRef, organisationId) => request('POST', `/api/platform/payments/${encodeURIComponent(txRef)}/assign`, { organisationId }),
 
   // inside the open station
-  meta: () => request('GET', st('/meta')),
-  getDay: (date) => request('GET', st(`/days/${date}`)),
+  meta: () => {
+    const id = stationId;
+    return cachedRead(`meta:${id}`, () => request('GET', st('/meta')));
+  },
+  getDay: (date) => {
+    const id = stationId;
+    return cachedRead(`day:${id}:${date}`, () => request('GET', st(`/days/${date}`)));
+  },
   saveDay: (date, body) => request('PUT', st(`/days/${date}`), body),
   deleteDay: (date) => request('DELETE', st(`/days/${date}`)),
-  month: (month) => request('GET', st(`/days?month=${month}`)),
+  month: (month) => {
+    const id = stationId;
+    return cachedRead(`month:${id}:${month}`, () => request('GET', st(`/days?month=${month}`)));
+  },
   getConfig: () => request('GET', st('/config')),
   saveConfig: (config) => request('PUT', st('/config'), config),
   getAdjustments: (month) => request('GET', st(`/adjustments/${month}`)),
@@ -74,9 +121,12 @@ export const api = {
 };
 
 export async function downloadExport(month) {
-  const res = await fetch(`${BASE}${st(`/export?month=${month}`)}`, {
-    headers: { Authorization: `Bearer ${getToken()}` },
-  });
+  let res;
+  try {
+    res = await fetch(`${BASE}${st(`/export?month=${month}`)}`, { headers: { Authorization: `Bearer ${getToken()}` } });
+  } catch {
+    throw new NetworkError();
+  }
   if (!res.ok) {
     let data = null;
     try {

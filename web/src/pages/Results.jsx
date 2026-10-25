@@ -94,6 +94,7 @@ export default function Results({ meta }) {
                   <h2>{PRODUCT_NAMES[p]} – month totals</h2>
                   <div className="stat"><span>Pump litres</span><b>{litres(t.pumpLitres)}</b></div>
                   <div className="stat"><span>Tank litres</span><b>{litres(t.tankLitres)}</b></div>
+                  {t.transferredOut > 0 && <div className="stat"><span>Fuel moved out (not sold)</span><b>{litres(t.transferredOut)}</b></div>}
                   <div className="stat"><span>Expected tolerance</span><b>{litres(t.expectedTolerance)}</b></div>
                   <div className="stat"><span>Actual tolerance</span><b>{litres(t.actualTolerance)}</b></div>
                   <div className="stat"><span>Variance (actual − expected)</span><b className={tone(t.toleranceVariance)}>{litres(t.toleranceVariance)}</b></div>
@@ -132,8 +133,8 @@ export default function Results({ meta }) {
                         {showProfit && <th>{p.toUpperCase()} tol. margin</th>}
                       </React.Fragment>
                     ))}
-                    <th>Expected cash</th>
-                    <th>Cash to lodge</th>
+                    <th>Total sales</th>
+                    <th>Available balance</th>
                     {showProfit && <th>Price + tol. margin</th>}
                     {showProfit && <th>Price-change</th>}
                   </tr>
@@ -156,7 +157,7 @@ export default function Results({ meta }) {
                         </React.Fragment>
                       ))}
                       <td>{num(d.banking.expectedCash)}</td>
-                      <td className={cls(d.banking.cashToLodge)}>{num(d.banking.cashToLodge)}</td>
+                      <td className={cls(d.banking.availableBalance)}>{num(d.banking.availableBalance)}</td>
                       {showProfit && <td className={cls(d.profit)}>{num(d.profit)}</td>}
                       {showProfit && <td className={cls(d.priceChangeGain)}>{num(d.priceChangeGain)}</td>}
                     </tr>
