@@ -136,9 +136,6 @@ export async function downloadExport(month) {
     }
     throw new ApiError(res.status, data);
   }
-  console.log('Export status:', res.status);
-  console.log('Content-Disposition:', res.headers.get('content-disposition'));
-  console.log('Current station ID:', stationId);
   const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? `station-${month}.xlsx`;
   const url = URL.createObjectURL(await res.blob());
   const a = document.createElement('a');
