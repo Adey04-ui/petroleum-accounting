@@ -241,6 +241,7 @@ export function stationRoutes(store) {
     need('admin'),
     wrap(async (req, res) => {
       const month = req.query.month ?? new Date().toISOString().slice(0, 7);
+      console.log(req.station.name)
       checkMonth(month);
       const { results } = await computeAll(store, req.station.id);
       const monthResults = results.filter((x) => x.date.startsWith(month));
