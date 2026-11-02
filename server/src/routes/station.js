@@ -240,6 +240,8 @@ export function stationRoutes(store) {
     '/export',
     need('admin'),
     wrap(async (req, res) => {
+      console.log('Exporting month', req.query.month, 'for station', req.station.id);
+      console.log(req)
       const month = req.query.month ?? new Date().toISOString().slice(0, 7);
       checkMonth(month);
       const { results } = await computeAll(store, req.station.id);
