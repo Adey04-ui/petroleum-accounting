@@ -38,7 +38,7 @@ export function createApp(
 
   const app = express();
   app.set('trust proxy', 1); // behind Render/Railway/Vercel, so rate limits see the real client address
-  app.use(cors({ origin: corsOrigin?.length ? corsOrigin : true }));
+  app.use(cors({ origin: corsOrigin?.length ? corsOrigin : true, exposedHeaders: ['Content-Disposition'] }));
   app.use(express.json({ limit: '200kb' }));
 
   const auth = createAuth(store, jwtSecret);
