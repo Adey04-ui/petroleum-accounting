@@ -240,8 +240,6 @@ export function stationRoutes(store) {
     '/export',
     need('admin'),
     wrap(async (req, res) => {
-      console.log('Exporting month', req.query.month, 'for station', req.station.id);
-      console.log(req)
       const month = req.query.month ?? new Date().toISOString().slice(0, 7);
       checkMonth(month);
       const { results } = await computeAll(store, req.station.id);
@@ -250,7 +248,7 @@ export function stationRoutes(store) {
       const adjustments = (await store.getSetting(req.station.id, `adjustments:${month}`)) ?? [];
       const summary = summarise({ adjustments }, monthResults);
       const buffer = await buildWorkbook({ month, days: monthResults, summary });
-      const safe = req.station.name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'station';
+      const safe = req.station.name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase()
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       res.setHeader('Content-Disposition', `attachment; filename="${safe}-${month}.xlsx"`);
       res.send(Buffer.from(buffer));
