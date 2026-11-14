@@ -60,7 +60,10 @@ export function hydrateForm(meta, ctx, entry) {
   const lines = [...(entry.payments ?? [])];
   if (entry.pos > 0) lines.push({ label: 'POS', amount: entry.pos });
   if (entry.transfer > 0) lines.push({ label: 'Transfer', amount: entry.transfer });
-  const channels = (meta.paymentChannels ?? []).map((label) => ({ label, amount: lines.find((l) => l.label === label)?.amount ?? '' }));
+  const channels = (meta.paymentChannels ?? []).map((label) => {
+    const saved = lines.find((l) => l.label === label);
+    return { label, amount: saved?.amount ?? '', declaration: saved?.declaration ?? '' };
+  });
   const extra = lines.filter((l) => !(meta.paymentChannels ?? []).includes(l.label));
   form.payments = [...channels, ...extra];
   form.expenses = Array.isArray(entry.expenses) && entry.expenses.length ? entry.expenses.map((l) => ({ ...l })) : entry.expenses > 0 ? [{ label: 'Expenses', amount: entry.expenses }] : [{ label: '', amount: '' }];
@@ -74,7 +77,11 @@ export function hydrateForm(meta, ctx, entry) {
 /** The request body for saving. `owner` unlocks the fields only an owner may set. */
 export function serializeForm(meta, ctx, form, { owner = false } = {}) {
   const body = {
-    payments: form.payments.filter((l) => !blank(l.amount)).map((l) => ({ label: l.label, amount: l.amount })),
+    payments: form.payments.filter((l) => !blank(l.amount)).map((l) => ({
+      label: l.label,
+      amount: l.amount,
+      ...( /pos/i.test(l.label) ? { declaration: l.declaration } : {}),
+    })),
     expenses: form.expenses.filter((l) => !blank(l.amount)).map((l) => ({ label: l.label, amount: l.amount })),
     creditSales: form.creditSales,
     creditReceived: form.creditReceived,

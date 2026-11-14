@@ -65,6 +65,7 @@ export default function Results({ meta }) {
         <>
           <div className="cards">
             <div className="card"><div className="k">Total sales</div><div className="v">{naira(s.totalSales)}</div></div>
+            <div className="card"><div className="k">POS charges</div><div className="v">{naira(s.charges ?? 0)}</div></div>
             {showProfit && (
               <>
                 <div className="card"><div className="k">Profit before expenses</div><div className="v">{naira(s.profitBeforeExpenses)}</div></div>

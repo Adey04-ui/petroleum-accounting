@@ -74,7 +74,7 @@ function closingsOf(d, tanks) {
 }
 
 const lines = (v, legacyLabel) => {
-  if (Array.isArray(v)) return v.filter((x) => x && isNum(x.amount)).map((x) => ({ label: String(x.label ?? legacyLabel), amount: x.amount }));
+  if (Array.isArray(v)) return v.filter((x) => x && isNum(x.amount)).map((x) => ({ label: String(x.label ?? legacyLabel), amount: x.amount, ...(isNum(x.declaration) ? { declaration: x.declaration } : {}) }));
   return isNum(v) && v > 0 ? [{ label: legacyLabel, amount: v }] : [];
 };
 
@@ -310,6 +310,10 @@ function calcBanking(day, config, r, prevAvailable, cumulative) {
   const expectedCash = sum(PRODUCTS, (p) => r[p]?.revenue ?? 0);
   const payments = lines(day.payments, 'Payment');
   const nonCash = sum(payments, (l) => l.amount) + (day.pos ?? 0) + (day.transfer ?? 0);
+  const posPayments = payments.filter((l) => /pos/i.test(l.label));
+  const posTotal = sum(posPayments, (l) => l.amount);
+  const posDeclared = sum(posPayments, (l) => l.declaration ?? 0);
+  const charges = posTotal - posDeclared;
   const expenseLines = lines(day.expenses, 'Expenses');
   const expenses = sum(expenseLines, (l) => l.amount);
   const creditSales = day.creditSales ?? 0;
@@ -323,6 +327,9 @@ function calcBanking(day, config, r, prevAvailable, cumulative) {
     previousBalance,
     payments,
     pos: day.pos ?? 0,
+    posTotal,
+    posDeclared,
+    charges,
     transfer: day.transfer ?? 0,
     nonCash,
     creditSales,
@@ -419,6 +426,7 @@ export function summarise(config, results) {
     products,
     totalSales,
     creditSales: sum(results, (r) => r.banking.creditSales),
+    charges: sum(results, (r) => r.banking.charges ?? 0),
     profitBeforeExpenses,
     expenses,
     adjustments,

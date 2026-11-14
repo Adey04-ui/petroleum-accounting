@@ -6,11 +6,15 @@ export const PRODUCTS = ['pms', 'ago'];
 
 const idOf = (v) => (v === undefined || v === null || String(v).trim() === '' ? undefined : String(v).trim());
 
-function cleanLines(arr, what) {
+function cleanLines(arr, what, includeDeclaration = false) {
   if (!Array.isArray(arr)) return undefined;
   return arr
     .filter((l) => l && toNum(l.amount, `${what} amount`) !== undefined)
-    .map((l) => ({ label: String(l.label ?? '').trim().slice(0, 60) || what, amount: toNum(l.amount, `${what} amount`) }));
+    .map((l) => ({
+      label: String(l.label ?? '').trim().slice(0, 60) || what,
+      amount: toNum(l.amount, `${what} amount`),
+      ...(includeDeclaration ? { declaration: toNum(l.declaration, `${what} declaration`) ?? 0 } : {}),
+    }));
 }
 
 function sanitizeProduct(p, key) {
@@ -56,7 +60,7 @@ function sanitizeProduct(p, key) {
 
 export function sanitizeDay(body) {
   const out = {
-    payments: cleanLines(body.payments, 'payment'),
+    payments: cleanLines(body.payments, 'payment', true),
     expenses: Array.isArray(body.expenses) ? cleanLines(body.expenses, 'expense') : toNum(body.expenses, 'expenses'),
     pos: toNum(body.pos, 'POS'),
     transfer: toNum(body.transfer, 'transfer'),

@@ -241,12 +241,21 @@ export default function Entry({ meta, initialDate }) {
             <h2>Money</h2>
             {meta.carryBalance && <Stat label="Previous balance (carried forward)" value={naira(ctx.previous?.balance ?? 0)} />}
             <h3>Paid by card, POS or transfer</h3>
-            {form.payments.map((l, i) => (
-              <div className="line" key={i}>
-                <Field label={l.label || 'Name'} type="number" value={l.amount} onChange={(v) => setTop({ payments: patchAt(form.payments, i, { amount: v }) })} aria-label={l.label || 'Payment'} />
-                {!(meta.paymentChannels ?? []).includes(l.label) && <button type="button" className="linkbtn" onClick={() => setTop({ payments: dropAt(form.payments, i) })}>Remove</button>}
-              </div>
-            ))}
+            {form.payments.map((l, i) => {
+              const isPos = /pos/i.test(l.label || '');
+              const posCharge = isPos ? (Number(l.amount) || 0) - (Number(l.declaration) || 0) : 0;
+              return (
+                <div className={isPos ? 'grid3' : 'line'} key={i}>
+                  <Field label={`${l.label || 'Payment'} amount (₦)`} type="number" value={l.amount} onChange={(v) => setTop({ payments: patchAt(form.payments, i, { amount: v }) })} aria-label={l.label || 'Payment'} />
+                  {isPos && <Field label="POS declaration (₦)" type="number" value={l.declaration ?? ''} onChange={(v) => setTop({ payments: patchAt(form.payments, i, { declaration: v }) })} aria-label={`${l.label} declaration`} />}
+                  {isPos && <Field label="Charges (₦)" type="number" value={posCharge.toFixed(2)} readOnly />}
+                  {!(meta.paymentChannels ?? []).includes(l.label) && <button type="button" className="linkbtn" onClick={() => setTop({ payments: dropAt(form.payments, i) })}>Remove</button>}
+                </div>
+              );
+            })}
+            {form.payments.some((l) => /pos/i.test(l.label || '')) && (
+              <div className="stat"><span>Total POS charges</span><b>{naira(form.payments.filter((l) => /pos/i.test(l.label || '')).reduce((total, l) => total + (Number(l.amount) || 0) - (Number(l.declaration) || 0), 0))}</b></div>
+            )}
             <button type="button" className="btn ghost small" onClick={() => { const label = window.prompt('Name of this payment (for example Opay):'); if (label?.trim()) setTop({ payments: [...form.payments, { label: label.trim(), amount: '' }] }); }}>+ Another payment type</button>
 
             <h3>Credit and banking</h3>
