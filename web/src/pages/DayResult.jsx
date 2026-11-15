@@ -55,7 +55,17 @@ export default function DayResult({ day, title }) {
       {b.expenseLines?.map((l, i) => <Stat key={`e${i}`} label={`− ${l.label}`} value={naira(l.amount)} />)}
       {b.banked > 0 && <Stat label="− Banked" value={naira(b.banked)} />}
       <Stat label="Available balance" value={naira(b.availableBalance)} tone={tone(b.availableBalance)} />
-      {b.moniepointDiff !== null && <Stat label="Moniepoint declared − POS" value={naira(b.moniepointDiff)} tone={tone(b.moniepointDiff)} />}
+      {b.posLabels?.length > 0 && (
+        <>
+          <h3>POS reconciliation</h3>
+          {b.posDeclarations?.map((line, i) => (
+            <Stat key={`pd${i}`} label={`${line.label} declared`} value={line.declaration === null ? 'Not recorded' : naira(line.declaration)} />
+          ))}
+          <Stat label="Total POS sales" value={naira(b.posTotal)} />
+          <Stat label="Total POS declared" value={naira(b.posDeclared)} />
+          <Stat label="POS charges" value={b.declarationsComplete ? naira(b.charges) : 'Incomplete — declarations missing'} tone={b.declarationsComplete ? tone(b.charges) : undefined} />
+        </>
+      )}
     </div>
   );
 }

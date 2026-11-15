@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { calculateMonth } from '../../server/src/engine/index.js';
 import { sanitizeDay } from '../../server/src/stationLogic.js';
-import { blankForm, hydrateForm, serializeForm, previewDay, nextContext } from '../src/entryForm.js';
+import { blankForm, hydrateForm, serializeForm, previewDay, nextContext, toNumber } from '../src/entryForm.js';
 
 // The station's own report, entered the way the form does.
 const meta = {
@@ -33,6 +33,7 @@ function filled() {
   f.ago.tanks.t1 = '0';
   f.ago.sellingPrice = '1880';
   f.payments[0].amount = '166800';
+  f.payments[0].declaration = '165000';
   f.expenses = [{ label: 'Data to POS', amount: '2000' }];
   return f;
 }
@@ -80,6 +81,7 @@ describe('saving and loading a form', () => {
     expect(again.pms.pumps['2'].idle).toBe(true);
     expect(again.pms.tanks.t1).toBe('5780');
     expect(again.payments.map((l) => [l.label, l.amount])).toEqual([['Moniepoint POS', '166800'], ['Zenith POS', '']]);
+    expect(again.payments[0].declaration).toBe('165000');
     expect(again.expenses).toEqual([{ label: 'Data to POS', amount: '2000' }]);
   });
 
@@ -108,5 +110,25 @@ describe('entering day after day with no signal', () => {
     const body = serializeForm(meta, { previous: next.previous }, day2, { owner: false });
     expect(body.pms.pumps[0].opening).toBeUndefined(); // the opening meter is known, so it is not sent
     expect(previewDay(meta, { previous: next.previous }, day2).products.pms.openingStock).toBe(5780);
+  });
+});
+
+
+describe('comma-formatted numeric inputs', () => {
+  it('removes thousands separators before calculating and serializing', () => {
+    const f = filled();
+    f.pms.pumps['1'].closing = '4,409.14';
+    f.pms.tanks.t1 = '5,780';
+    f.payments[0].amount = '166,800';
+    f.payments[0].declaration = '165,000';
+    expect(toNumber('1,234,567.89')).toBe(1234567.89);
+    expect(previewDay(meta, ctx, f).products.pms.pumps[0].sold).toBeCloseTo(22.16, 2);
+    const body = serializeForm(meta, ctx, f, { owner: true });
+    expect(body.payments[0].amount).toBe('166,800');
+    expect(body.payments[0].declaration).toBe('165,000');
+    f.payments[0].amount = '';
+    f.payments[0].declaration = '0';
+    const declarationOnly = serializeForm(meta, ctx, f, { owner: true });
+    expect(declarationOnly.payments[0]).toMatchObject({ label: 'Moniepoint POS', amount: 0, declaration: '0' });
   });
 });

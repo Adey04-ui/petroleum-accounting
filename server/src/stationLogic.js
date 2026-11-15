@@ -9,12 +9,21 @@ const idOf = (v) => (v === undefined || v === null || String(v).trim() === '' ? 
 function cleanLines(arr, what, includeDeclaration = false) {
   if (!Array.isArray(arr)) return undefined;
   return arr
-    .filter((l) => l && toNum(l.amount, `${what} amount`) !== undefined)
-    .map((l) => ({
-      label: String(l.label ?? '').trim().slice(0, 60) || what,
-      amount: toNum(l.amount, `${what} amount`),
-      ...(includeDeclaration ? { declaration: toNum(l.declaration, `${what} declaration`) ?? 0 } : {}),
-    }));
+    .filter((l) => {
+      if (!l) return false;
+      const amount = toNum(l.amount, `${what} amount`);
+      const declaration = includeDeclaration ? toNum(l.declaration, `${what} declaration`) : undefined;
+      return amount !== undefined || declaration !== undefined;
+    })
+    .map((l) => {
+      const amount = toNum(l.amount, `${what} amount`);
+      const declaration = includeDeclaration ? toNum(l.declaration, `${what} declaration`) : undefined;
+      return {
+        label: String(l.label ?? '').trim().slice(0, 60) || what,
+        amount: amount ?? 0,
+        ...(includeDeclaration && declaration !== undefined ? { declaration } : {}),
+      };
+    });
 }
 
 function sanitizeProduct(p, key) {
@@ -67,7 +76,6 @@ export function sanitizeDay(body) {
     creditSales: toNum(body.creditSales, 'credit sales'),
     creditReceived: toNum(body.creditReceived, 'credit received'),
     banked: toNum(body.banked, 'banked'),
-    moniepointDeclared: toNum(body.moniepointDeclared, 'Moniepoint declared'),
   };
   for (const p of PRODUCTS) {
     const v = sanitizeProduct(body[p], p.toUpperCase());

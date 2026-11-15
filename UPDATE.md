@@ -1,7 +1,41 @@
+# Latest update: POS declarations, date switching and comma-formatted values
+
+This update builds on the existing project without changing the Prisma schema.
+
+## POS declarations and charges
+
+- Each configured payment channel whose label contains `POS` has a declaration input.
+- POS declarations are stored beside their payment line in `DayEntry.data` JSON as `payments[].declaration`.
+- A missing declaration is incomplete; an explicitly entered `0` is a valid declaration.
+- Daily POS charges are total POS sales minus total POS declarations, but only when every configured POS channel has a declaration.
+- Incomplete days do not contribute to the monthly POS-charge total.
+- Completed monthly POS charges are deducted from `profitAfterExpenses`, separately from ordinary expenses and adjustments. They do not change cash reconciliation or `totalExpenses`.
+- The previous Moniepoint-only declaration field and calculation have been removed. Existing older records remain readable; they simply have no new POS declaration data and therefore count as incomplete for POS charges.
+
+## Date switching
+
+- Selecting an empty date changes the selected date but leaves the current form values untouched.
+- Selecting a date that already has a saved record loads that record into the form.
+- The saved-day check runs asynchronously; stale date-check responses are ignored.
+- Saving asks the user to confirm the selected date. Cancelling keeps the form values.
+
+## Comma-formatted numbers
+
+Numeric input processing removes commas before converting values to numbers. This applies to daily entries, station setup values and monthly adjustments. For example, `1,234,567.89` is processed as `1234567.89`.
+
+## Database
+
+No Prisma schema change or database migration is required for this update. POS declarations are stored in the existing `DayEntry.data` JSON field. The older deployment instructions below describe earlier project changes; their `db:push` step is not needed for this update.
+
+## Verification
+
+Server JavaScript syntax checks, frontend JavaScript/JSX parsing and focused runtime checks for POS calculations and comma parsing passed. The full Vitest suites were not run because dependencies were not installed in this environment (the package cache did not contain all required packages).
+
+---
+
 # Updating your deployed app
 
-This package contains **only the files that changed** (plus new ones), in the same folders as your project.
-Your database, your Vercel projects and your settings stay as they are.
+The archive provided for this update contains the full project in its existing `fuelapp2/` folder structure. The list of files changed in this update is in `CHANGED_FILES.txt`. Your database, Vercel projects and settings stay as they are.
 
 ## 1. Put the files in
 

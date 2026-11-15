@@ -245,7 +245,8 @@ th { color: var(--label-2); font-weight: 500; font-size: 0.75rem; letter-spacing
 .pump + .pump { border-top: 0.5px solid var(--separator); }
 .pump .head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.4rem; font-weight: 600; letter-spacing: -0.01em; }
 .pump .head small { font-weight: 400; color: var(--label-2); font-size: 0.8125rem; }
-.line { display: grid; grid-template-columns: 1fr auto; gap: 0.5rem; align-items: end; margin-bottom: 0.5rem; }
+.line { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.5rem; align-items: end; margin-bottom: 0.5rem; }
+.entry-fields { display: block; min-width: 0; margin: 0; padding: 0; border: 0; }
 .line.three { grid-template-columns: 1fr 1fr auto; }
 .line.four { grid-template-columns: 1fr 1fr 1fr auto; }
 @media (max-width: 34rem) { .line.three, .line.four { grid-template-columns: 1fr 1fr; } .line .linkbtn { justify-self: start; } }

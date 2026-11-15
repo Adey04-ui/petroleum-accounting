@@ -12,8 +12,10 @@ export const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, nex
 export const isNum = (x) => typeof x === 'number' && Number.isFinite(x);
 
 export function toNum(v, label) {
-  if (v === '' || v === null || v === undefined) return undefined;
-  const n = Number(v);
+  if (v === null || v === undefined) return undefined;
+  const normalized = typeof v === 'string' ? v.replace(/,/g, '').trim() : v;
+  if (normalized === '') return undefined;
+  const n = Number(normalized);
   if (!Number.isFinite(n)) throw new HttpError(400, `${label} must be a number`);
   return n;
 }

@@ -77,7 +77,7 @@ export function stationRoutes(store) {
     wrap(async (req, res) => {
       checkMonth(req.params.month);
       const list = (Array.isArray(req.body.adjustments) ? req.body.adjustments : [])
-        .map((a) => ({ label: String(a.label ?? '').trim(), amount: a.amount === '' || a.amount == null ? undefined : Number(a.amount) }))
+        .map((a) => ({ label: String(a.label ?? '').trim(), amount: toNum(a.amount, 'adjustment amount') }))
         .filter((a) => a.label && isNum(a.amount));
       await store.setSetting(req.station.id, `adjustments:${req.params.month}`, list);
       res.json({ adjustments: list });
@@ -122,7 +122,8 @@ export function stationRoutes(store) {
       }
 
       const existing = entries.find((e) => e.date === date);
-      const { results } = entries.length ? await computeAll(store, sid) : { results: [] };
+      // Empty-date checks do not need a full recalculation unless carried cash depends on prior days.
+      const { results } = (existing || config.carryBalance) ? await computeAll(store, sid) : { results: [] };
       const result = existing ? results.find((x) => x.date === date) ?? null : null;
       if (config.carryBalance) {
         const prior = [...results].reverse().find((x) => x.date < date);

@@ -28,11 +28,10 @@
 //       sellingPrice, replacementCost?, toleranceRate?   // toleranceRate here overrides the station's, for this day only
 //     },
 //     ago: { ... },
-//     payments: [{ label, amount }],        // non-cash: POS, transfers (Moniepoint, Zenith...)
+//     payments: [{ label, amount, declaration? }], // non-cash payments; POS channels may include a declaration
 //     pos, transfer,                        // older single-number versions of the above (still accepted)
 //     creditSales, creditReceived, banked,  // credit given today, credit paid back today, cash lodged to the bank today
 //     expenses: number | [{ label, amount }],
-//     moniepointDeclared?,
 //   }
 //
 // PROFIT
@@ -122,7 +121,14 @@ export function validateMonth(config, days) {
     }
     if (has(day.expenses) && !Array.isArray(day.expenses) && (!isNum(day.expenses) || day.expenses < 0)) err(date, 'expenses', 'Must be a number, 0 or more');
     for (const key of ['payments', 'expenses']) {
-      if (Array.isArray(day[key])) for (const l of day[key]) if (!isNum(l?.amount) || l.amount < 0) err(date, key, 'Every line needs an amount of 0 or more');
+      if (Array.isArray(day[key])) {
+        for (const l of day[key]) {
+          if (!isNum(l?.amount) || l.amount < 0) err(date, key, 'Every line needs an amount of 0 or more');
+          if (key === 'payments' && has(l?.declaration) && (!isNum(l.declaration) || l.declaration < 0)) {
+            err(date, `${key} declaration`, 'Every POS declaration must be a number of 0 or more');
+          }
+        }
+      }
     }
 
     for (const p of PRODUCTS) {
@@ -311,9 +317,20 @@ function calcBanking(day, config, r, prevAvailable, cumulative) {
   const payments = lines(day.payments, 'Payment');
   const nonCash = sum(payments, (l) => l.amount) + (day.pos ?? 0) + (day.transfer ?? 0);
   const posPayments = payments.filter((l) => /pos/i.test(l.label));
-  const posTotal = sum(posPayments, (l) => l.amount);
-  const posDeclared = sum(posPayments, (l) => l.declaration ?? 0);
-  const charges = posTotal - posDeclared;
+  const configuredPosChannels = (config.paymentChannels ?? []).filter((label) => /pos/i.test(label));
+  const posLabels = [...new Map([
+    ...configuredPosChannels,
+    ...posPayments.map((l) => l.label),
+    ...((day.pos ?? 0) > 0 ? ['POS'] : []),
+  ].map((label) => [label.toLowerCase(), label])).values()];
+  const posTotal = sum(posPayments, (l) => l.amount) + (day.pos ?? 0);
+  const posDeclared = sum(posPayments.filter((l) => isNum(l.declaration)), (l) => l.declaration);
+  const posDeclarations = posLabels.map((label) => {
+    const payment = posPayments.find((l) => l.label.toLowerCase() === label.toLowerCase());
+    return { label, sales: payment?.amount ?? 0, declaration: isNum(payment?.declaration) ? payment.declaration : null };
+  });
+  const declarationsComplete = posLabels.length > 0 && posDeclarations.every((line) => line.declaration !== null);
+  const charges = declarationsComplete ? posTotal - posDeclared : null;
   const expenseLines = lines(day.expenses, 'Expenses');
   const expenses = sum(expenseLines, (l) => l.amount);
   const creditSales = day.creditSales ?? 0;
@@ -321,7 +338,6 @@ function calcBanking(day, config, r, prevAvailable, cumulative) {
   const banked = day.banked ?? 0;
   const previousBalance = config.carryBalance ? prevAvailable : 0;
   const availableBalance = previousBalance + expectedCash - nonCash - creditSales + creditReceived - expenses - banked;
-  const monie = sum(payments.filter((l) => /moniepoint/i.test(l.label)), (l) => l.amount) + (day.pos ?? 0);
   return {
     expectedCash,
     previousBalance,
@@ -329,6 +345,9 @@ function calcBanking(day, config, r, prevAvailable, cumulative) {
     pos: day.pos ?? 0,
     posTotal,
     posDeclared,
+    posLabels,
+    posDeclarations,
+    declarationsComplete,
     charges,
     transfer: day.transfer ?? 0,
     nonCash,
@@ -341,8 +360,6 @@ function calcBanking(day, config, r, prevAvailable, cumulative) {
     cashToLodge: availableBalance,
     totalInBank: nonCash + availableBalance,
     cumulativeCashToLodge: config.carryBalance ? availableBalance : cumulative + availableBalance,
-    moniepointDeclared: day.moniepointDeclared ?? null,
-    moniepointDiff: isNum(day.moniepointDeclared) ? day.moniepointDeclared - monie : null,
   };
 }
 
@@ -421,17 +438,19 @@ export function summarise(config, results) {
   const expenses = sum(results, (r) => r.banking.expenses);
   const adjustmentsTotal = sum(adjustments, (a) => a.amount);
   const priceChangeGain = sum(Object.values(products), (x) => x.priceChangeGain);
+  const totalPosCharges = sum(results, (r) => r.banking.charges ?? 0);
 
   return {
     products,
     totalSales,
     creditSales: sum(results, (r) => r.banking.creditSales),
-    charges: sum(results, (r) => r.banking.charges ?? 0),
+    totalPosCharges,
+    charges: totalPosCharges,
     profitBeforeExpenses,
     expenses,
     adjustments,
     totalExpenses: expenses + adjustmentsTotal,
-    profitAfterExpenses: profitBeforeExpenses - expenses - adjustmentsTotal, // sheet: "Gross Profit"
+    profitAfterExpenses: profitBeforeExpenses - expenses - adjustmentsTotal - totalPosCharges, // sheet: "Gross Profit"
     priceChangeGain,
     normalProfit: profitBeforeExpenses - priceChangeGain,
   };

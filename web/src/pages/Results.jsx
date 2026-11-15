@@ -65,11 +65,11 @@ export default function Results({ meta }) {
         <>
           <div className="cards">
             <div className="card"><div className="k">Total sales</div><div className="v">{naira(s.totalSales)}</div></div>
-            <div className="card"><div className="k">POS charges</div><div className="v">{naira(s.charges ?? 0)}</div></div>
             {showProfit && (
               <>
                 <div className="card"><div className="k">Profit before expenses</div><div className="v">{naira(s.profitBeforeExpenses)}</div></div>
                 <div className="card"><div className="k">Total expenses</div><div className="v">{naira(s.totalExpenses)}</div></div>
+                <div className="card"><div className="k">POS charges</div><div className="v">{naira(s.totalPosCharges ?? s.charges ?? 0)}</div></div>
                 <div className="card"><div className="k">Profit after expenses</div><div className="v">{naira(s.profitAfterExpenses)}</div></div>
                 <div className="card"><div className="k">Price-change gain / loss</div><div className="v">{naira(s.priceChangeGain)}</div></div>
                 <div className="card"><div className="k">Profit with no price movement</div><div className="v">{naira(s.normalProfit)}</div></div>
@@ -135,6 +135,7 @@ export default function Results({ meta }) {
                       </React.Fragment>
                     ))}
                     <th>Total sales</th>
+                    {showProfit && <th>POS charges</th>}
                     <th>Available balance</th>
                     {showProfit && <th>Price + tol. margin</th>}
                     {showProfit && <th>Price-change</th>}
@@ -158,6 +159,7 @@ export default function Results({ meta }) {
                         </React.Fragment>
                       ))}
                       <td>{num(d.banking.expectedCash)}</td>
+                      {showProfit && <td>{d.banking.posLabels?.length ? (d.banking.charges === null ? 'Incomplete' : num(d.banking.charges)) : '—'}</td>}
                       <td className={cls(d.banking.availableBalance)}>{num(d.banking.availableBalance)}</td>
                       {showProfit && <td className={cls(d.profit)}>{num(d.profit)}</td>}
                       {showProfit && <td className={cls(d.priceChangeGain)}>{num(d.priceChangeGain)}</td>}

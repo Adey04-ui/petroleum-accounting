@@ -23,7 +23,7 @@ const SUMMARY_PRODUCT_COST_FIELDS = [
   'transferCost', 'costOfGoodsSold', 'priceMargin', 'toleranceMargin', 'profit', 'priceChangeGain', 'closingStockValue',
 ];
 const SUMMARY_COST_FIELDS = [
-  'profitBeforeExpenses', 'adjustments', 'totalExpenses', 'profitAfterExpenses', 'priceChangeGain', 'normalProfit',
+  'profitBeforeExpenses', 'adjustments', 'totalExpenses', 'totalPosCharges', 'charges', 'profitAfterExpenses', 'priceChangeGain', 'normalProfit',
 ];
 
 /** Remove cost/profit figures from one calculated day for roles that may not see them. */

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { calculateMonth, validateMonth } from '../../src/engine/index.js';
+import { toNum } from '../../src/http.js';
 
 // The station's own daily report for Tue 01/09/2026 (PMS 1,310, AGO 1,880).
 const cfg = {
@@ -159,5 +160,58 @@ describe('the cash side of the report', () => {
     ]);
     expect(days[0].banking.availableBalance).toBe(80000);
     expect(days[1].banking.availableBalance).toBe(70000);
+  });
+});
+
+
+describe('POS declarations and charges', () => {
+  const config = {
+    paymentChannels: ['Moniepoint POS', 'OPay POS', 'Transfer'],
+    pms: { openingCostPerLitre: 1000, toleranceRate: 0, openingStock: 5000 },
+  };
+  const day = (payments) => ({
+    date: '2026-11-10',
+    pms: { pumps: [{ id: '1', opening: 0, closing: 100 }], closingStock: 4900, sellingPrice: 1200 },
+    payments,
+  });
+
+  it('calculates charges only after every configured POS channel has a declaration', () => {
+    const complete = calculateMonth(config, [day([
+      { label: 'Moniepoint POS', amount: 10000, declaration: 9900 },
+      { label: 'OPay POS', amount: 5000, declaration: 4600 },
+    ])]);
+    expect(complete.days[0].banking.declarationsComplete).toBe(true);
+    expect(complete.days[0].banking.posTotal).toBe(15000);
+    expect(complete.days[0].banking.posDeclared).toBe(14500);
+    expect(complete.days[0].banking.charges).toBe(500);
+    expect(complete.summary.totalPosCharges).toBe(500);
+    expect(complete.summary.totalExpenses).toBe(0);
+    expect(complete.summary.profitAfterExpenses).toBe(19500);
+    expect(complete.summary.normalProfit).toBe(complete.summary.profitBeforeExpenses - complete.summary.priceChangeGain);
+  });
+
+  it('treats a missing declaration as incomplete, but accepts an explicitly entered zero', () => {
+    const incomplete = calculateMonth(config, [day([
+      { label: 'Moniepoint POS', amount: 10000, declaration: 9900 },
+      { label: 'OPay POS', amount: 5000 },
+    ])]);
+    expect(incomplete.days[0].banking.charges).toBeNull();
+    expect(incomplete.summary.totalPosCharges).toBe(0);
+
+    const zeroIsRecorded = calculateMonth(config, [day([
+      { label: 'Moniepoint POS', amount: 10000, declaration: 0 },
+      { label: 'OPay POS', amount: 5000, declaration: 0 },
+    ])]);
+    expect(zeroIsRecorded.days[0].banking.declarationsComplete).toBe(true);
+    expect(zeroIsRecorded.days[0].banking.charges).toBe(15000);
+  });
+});
+
+
+describe('number input normalization', () => {
+  it('removes commas before converting numeric input', () => {
+    expect(toNum('1,234,567.89', 'amount')).toBe(1234567.89);
+    expect(toNum(' 12,000 ', 'amount')).toBe(12000);
+    expect(toNum('', 'amount')).toBeUndefined();
   });
 });

@@ -4,7 +4,11 @@
 
 const PRODUCTS = ['pms', 'ago'];
 const blank = (v) => v === '' || v === null || v === undefined;
-export const toNumber = (v) => (blank(v) ? NaN : Number(v));
+export const toNumber = (v) => {
+  if (blank(v)) return NaN;
+  const normalized = typeof v === 'string' ? v.replace(/,/g, '').trim() : v;
+  return normalized === '' ? NaN : Number(normalized);
+};
 const n0 = (v) => (Number.isFinite(toNumber(v)) ? toNumber(v) : 0);
 const sum = (arr, f) => arr.reduce((s, x) => s + f(x), 0);
 const per20 = (rate) => (rate === undefined || rate === null ? '' : Number((rate * 20).toFixed(4)));
@@ -14,12 +18,11 @@ export const productsOf = (meta) => PRODUCTS.filter((p) => meta.products?.[p]);
 /** A fresh form for a day with nothing saved yet. */
 export function blankForm(meta, ctx) {
   const form = {
-    payments: (meta.paymentChannels ?? []).map((label) => ({ label, amount: '' })),
+    payments: (meta.paymentChannels ?? []).map((label) => ({ label, amount: '', declaration: '' })),
     creditSales: '',
     creditReceived: '',
     banked: '',
     expenses: [{ label: '', amount: '' }],
-    moniepointDeclared: '',
   };
   for (const p of productsOf(meta)) {
     const m = meta.products[p];
@@ -70,23 +73,23 @@ export function hydrateForm(meta, ctx, entry) {
   form.creditSales = entry.creditSales ?? '';
   form.creditReceived = entry.creditReceived ?? '';
   form.banked = entry.banked ?? '';
-  form.moniepointDeclared = entry.moniepointDeclared ?? '';
   return form;
 }
 
 /** The request body for saving. `owner` unlocks the fields only an owner may set. */
 export function serializeForm(meta, ctx, form, { owner = false } = {}) {
   const body = {
-    payments: form.payments.filter((l) => !blank(l.amount)).map((l) => ({
-      label: l.label,
-      amount: l.amount,
-      ...( /pos/i.test(l.label) ? { declaration: l.declaration } : {}),
-    })),
+    payments: form.payments
+      .filter((l) => !blank(l.amount) || (/pos/i.test(l.label) && !blank(l.declaration)))
+      .map((l) => ({
+        label: l.label,
+        amount: blank(l.amount) ? 0 : l.amount,
+        ...(/pos/i.test(l.label) ? { declaration: blank(l.declaration) ? undefined : l.declaration } : {}),
+      })),
     expenses: form.expenses.filter((l) => !blank(l.amount)).map((l) => ({ label: l.label, amount: l.amount })),
     creditSales: form.creditSales,
     creditReceived: form.creditReceived,
     banked: form.banked,
-    moniepointDeclared: form.moniepointDeclared,
   };
   for (const p of productsOf(meta)) {
     const m = meta.products[p];
@@ -158,6 +161,16 @@ export function previewDay(meta, ctx, form) {
   }
   const nonCash = sum(form.payments, (l) => n0(l.amount));
   const expenses = sum(form.expenses, (l) => n0(l.amount));
+  const posPayments = form.payments.filter((l) => /pos/i.test(l.label));
+  const configuredPosChannels = (meta.paymentChannels ?? []).filter((label) => /pos/i.test(label));
+  const posLabels = [...new Map([...configuredPosChannels, ...posPayments.map((l) => l.label)].map((label) => [label.toLowerCase(), label])).values()];
+  const posTotal = sum(posPayments, (l) => n0(l.amount));
+  const posDeclared = sum(posPayments.filter((l) => Number.isFinite(toNumber(l.declaration))), (l) => toNumber(l.declaration));
+  const posDeclarationsComplete = posLabels.length > 0 && posLabels.every((label) => {
+    const line = posPayments.find((l) => l.label.toLowerCase() === label.toLowerCase());
+    return Boolean(line && Number.isFinite(toNumber(line.declaration)));
+  });
+  const posCharges = posDeclarationsComplete ? posTotal - posDeclared : null;
   const previousBalance = meta.carryBalance ? ctx?.previous?.balance ?? 0 : 0;
   const availableBalance = previousBalance + sales - nonCash - n0(form.creditSales) + n0(form.creditReceived) - expenses - n0(form.banked);
   out.banking = {
@@ -168,6 +181,11 @@ export function previewDay(meta, ctx, form) {
     creditReceived: n0(form.creditReceived),
     banked: n0(form.banked),
     expenses,
+    posLabels,
+    posTotal,
+    posDeclared,
+    posDeclarationsComplete,
+    posCharges,
     availableBalance,
   };
   return out;

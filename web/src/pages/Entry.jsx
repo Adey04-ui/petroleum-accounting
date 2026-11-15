@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api, NetworkError } from '../api.js';
 import { kvGet, kvSet, outboxGet, outboxDelete, outboxKey } from '../offline.js';
 import { queueDay, syncNow } from '../sync.js';
@@ -27,11 +27,15 @@ export default function Entry({ meta, initialDate }) {
   const [conflict, setConflict] = useState(null);
   const [busy, setBusy] = useState(false);
   const [tick, setTick] = useState(0);
+  const [dateChecking, setDateChecking] = useState(false);
+  const [dateReady, setDateReady] = useState(false);
+  const dateRequest = useRef(0);
 
   useEffect(() => {
     let live = true;
-    setForm(null);
-    setCtx(null);
+    const requestId = ++dateRequest.current;
+    setDateChecking(true);
+    setDateReady(false);
     setError(null);
     setConflict(null);
     (async () => {
@@ -41,24 +45,40 @@ export default function Entry({ meta, initialDate }) {
         c = await api.getDay(date);
       } catch (e) {
         if (!(e instanceof NetworkError)) throw e;
-        // No signal and nothing saved for this exact day: carry on from where this phone last knew the books stood.
+        // Offline fallback is only safe for a future, unsaved date whose previous context is known locally.
         const known = await kvGet(`ctx:${sid}`);
-        if (!known || date <= known.asOf) throw new Error('You are offline and this day is not saved on this phone yet.');
+        if (!known || date <= known.asOf) throw new Error('You are offline and this day could not be verified on this phone. Your current form has been preserved.');
         c = { date, entry: null, version: 0, previous: known.previous, result: null, offline: true };
       }
-      if (!live) return;
+      if (!live || requestId !== dateRequest.current) return;
       if (!c.entry && !c.offline) await kvSet(`ctx:${sid}`, { asOf: c.previous.date ?? '0000-00-00', previous: c.previous });
       setCtx(c);
       setQueued(q ?? null);
-      setForm(hydrateForm(meta, c, q ? q.body : c.entry));
-    })().catch((e) => live && setError(e));
+      // Empty destination: keep the form exactly as the user left it. Saved/outbox destination: load its data.
+      if (c.entry || q || !form) setForm(hydrateForm(meta, c, q ? q.body : c.entry));
+      setDateReady(true);
+    })()
+      .catch((e) => {
+        if (live && requestId === dateRequest.current) setError(e);
+      })
+      .finally(() => {
+        if (live && requestId === dateRequest.current) setDateChecking(false);
+      });
     return () => {
       live = false;
     };
   }, [date, tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const preview = useMemo(() => (form && ctx ? previewDay(meta, ctx, form) : null), [form, ctx]); // eslint-disable-line react-hooks/exhaustive-deps
-  const locked = Boolean(ctx?.entry) && !perm.editExistingDays;
+  const locked = !dateChecking && Boolean(ctx?.entry) && !perm.editExistingDays;
+
+  const changeDate = (nextDate) => {
+    if (!nextDate || nextDate === date) return;
+    setDateReady(false);
+    setDateChecking(true);
+    setDate(nextDate);
+    setSaved(null);
+  };
 
   const setProd = (p, patch) => setForm((f) => ({ ...f, [p]: { ...f[p], ...patch } }));
   const setPump = (p, id, patch) => setForm((f) => ({ ...f, [p]: { ...f[p], pumps: { ...f[p].pumps, [id]: { ...f[p].pumps[id], ...patch } } } }));
@@ -66,6 +86,8 @@ export default function Entry({ meta, initialDate }) {
 
   async function save(e) {
     e.preventDefault();
+    if (!dateReady || dateChecking || busy) return;
+    if (!window.confirm(`Are you sure you want to save this data for ${date}?`)) return;
     setBusy(true);
     setError(null);
     setConflict(null);
@@ -100,19 +122,28 @@ export default function Entry({ meta, initialDate }) {
   }
 
   async function remove() {
-    if (!window.confirm(`Delete the entry for ${date}? Its sales will roll into the next day's meter readings.`)) return;
+    const deletingDate = date;
+    if (!window.confirm(`Delete the entry for ${deletingDate}? Its sales will roll into the next day's meter readings.`)) return;
+    setBusy(true);
     try {
-      await api.deleteDay(date);
+      await api.deleteDay(deletingDate);
+      setForm(null);
+      setCtx(null);
+      setQueued(null);
+      setSaved(null);
       setTick((t) => t + 1);
     } catch (err) {
       setError(err);
+    } finally {
+      setBusy(false);
     }
   }
 
   return (
     <div>
       <div className="card">
-        <Field label="Date" type="date" value={date} onChange={(v) => v && (setDate(v), setSaved(null))} />
+        <Field label="Date" type="date" value={date} onChange={changeDate} disabled={busy} />
+        {dateChecking && <p className="footnote" style={{ margin: '0.5rem 0 0' }}>Checking selected date…</p>}
         {ctx?.offline && <p className="footnote" style={{ margin: '0.5rem 0 0' }}>You are offline. Days you save are kept on this phone and upload when the signal is back.</p>}
       </div>
 
@@ -128,6 +159,7 @@ export default function Entry({ meta, initialDate }) {
 
       {form && !locked && (
         <form onSubmit={save}>
+          <fieldset disabled={dateChecking || busy} className="entry-fields">
           {queued && (
             <div className={`msg ${queued.status === 'pending' ? 'warn' : 'error'}`}>
               {queued.status === 'pending' && 'This day is saved on this phone and waiting to upload.'}
@@ -242,21 +274,18 @@ export default function Entry({ meta, initialDate }) {
             {meta.carryBalance && <Stat label="Previous balance (carried forward)" value={naira(ctx.previous?.balance ?? 0)} />}
             <h3>Paid by card, POS or transfer</h3>
             {form.payments.map((l, i) => {
-              const isPos = /pos/i.test(l.label || '');
-              const posCharge = isPos ? (Number(l.amount) || 0) - (Number(l.declaration) || 0) : 0;
+              const isPos = /pos/i.test(l.label);
               return (
-                <div className={isPos ? 'grid3' : 'line'} key={i}>
-                  <Field label={`${l.label || 'Payment'} amount (₦)`} type="number" value={l.amount} onChange={(v) => setTop({ payments: patchAt(form.payments, i, { amount: v }) })} aria-label={l.label || 'Payment'} />
-                  {isPos && <Field label="POS declaration (₦)" type="number" value={l.declaration ?? ''} onChange={(v) => setTop({ payments: patchAt(form.payments, i, { declaration: v }) })} aria-label={`${l.label} declaration`} />}
-                  {isPos && <Field label="Charges (₦)" type="number" value={posCharge.toFixed(2)} readOnly />}
+                <div className="line" key={i}>
+                  <div className={isPos ? 'grid2' : undefined}>
+                    <Field label={l.label || 'Name'} type="number" value={l.amount} onChange={(v) => setTop({ payments: patchAt(form.payments, i, { amount: v }) })} aria-label={l.label || 'Payment'} />
+                    {isPos && <Field label={`${l.label} declared (₦)`} type="number" value={l.declaration ?? ''} onChange={(v) => setTop({ payments: patchAt(form.payments, i, { declaration: v }) })} aria-label={`${l.label} declaration`} />}
+                  </div>
                   {!(meta.paymentChannels ?? []).includes(l.label) && <button type="button" className="linkbtn" onClick={() => setTop({ payments: dropAt(form.payments, i) })}>Remove</button>}
                 </div>
               );
             })}
-            {form.payments.some((l) => /pos/i.test(l.label || '')) && (
-              <div className="stat"><span>Total POS charges</span><b>{naira(form.payments.filter((l) => /pos/i.test(l.label || '')).reduce((total, l) => total + (Number(l.amount) || 0) - (Number(l.declaration) || 0), 0))}</b></div>
-            )}
-            <button type="button" className="btn ghost small" onClick={() => { const label = window.prompt('Name of this payment (for example Opay):'); if (label?.trim()) setTop({ payments: [...form.payments, { label: label.trim(), amount: '' }] }); }}>+ Another payment type</button>
+            <button type="button" className="btn ghost small" onClick={() => { const label = window.prompt('Name of this payment (for example OPay POS for a POS channel):'); if (label?.trim()) setTop({ payments: [...form.payments, { label: label.trim(), amount: '', declaration: '' }] }); }}>+ Another payment type</button>
 
             <h3>Credit and banking</h3>
             <div className="grid3">
@@ -275,8 +304,6 @@ export default function Entry({ meta, initialDate }) {
             ))}
             <button type="button" className="btn ghost small" onClick={() => setTop({ expenses: [...form.expenses, { label: '', amount: '' }] })}>+ Add expense</button>
 
-            <h3>Optional</h3>
-            <Field label="Moniepoint declared (₦)" type="number" value={form.moniepointDeclared} onChange={(v) => setTop({ moniepointDeclared: v })} />
           </div>
 
           {preview && (
@@ -296,6 +323,13 @@ export default function Entry({ meta, initialDate }) {
               })}
               <h3>Cash</h3>
               <Stat label="Available balance" value={naira(preview.banking.availableBalance)} tone={tone(preview.banking.availableBalance)} />
+              {preview.banking.posLabels.length > 0 && (
+                <>
+                  <Stat label="Total POS sales" value={naira(preview.banking.posTotal)} />
+                  <Stat label="Total POS declared" value={naira(preview.banking.posDeclared)} />
+                  <Stat label="POS charges" value={preview.banking.posDeclarationsComplete ? naira(preview.banking.posCharges) : 'Incomplete — declarations missing'} />
+                </>
+              )}
             </div>
           )}
 
@@ -310,9 +344,10 @@ export default function Entry({ meta, initialDate }) {
           {saved?.day && <div className="msg ok">Saved.</div>}
 
           <div className="actionbar">
-            <button className="btn" disabled={busy}>{busy ? 'Saving…' : ctx.entry ? 'Update day' : 'Save day'}</button>
+            <button className="btn" disabled={busy || dateChecking || !dateReady}>{busy ? 'Saving…' : ctx.entry ? 'Update day' : 'Save day'}</button>
             {perm.admin && ctx.entry && <button type="button" className="btn ghost danger" onClick={remove}>Delete day</button>}
           </div>
+          </fieldset>
         </form>
       )}
 

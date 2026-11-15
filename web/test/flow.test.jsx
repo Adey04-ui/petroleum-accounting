@@ -21,6 +21,7 @@ let offline = false;
 globalThis.fetch = (...args) => (offline ? Promise.reject(new TypeError('Failed to fetch')) : realFetch(...args));
 
 beforeAll(async () => {
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
   store = createMemoryStore();
   await store.createUser({ name: 'Admin', email: 'admin@test.com', passwordHash: HASH, isPlatformAdmin: true });
   server = await new Promise((resolve) => {
@@ -79,6 +80,7 @@ const fillDay = (closings) => {
   for (const [id, v] of Object.entries(closings.pumps)) type(`Pump ${id} closing`, v);
   type('Tank 1 dip', closings.dip);
   type('Moniepoint POS', closings.pos);
+  type('Moniepoint POS declared (₦)', closings.pos);
 };
 
 describe('the customer journey', () => {
@@ -174,6 +176,14 @@ describe('the customer journey', () => {
     expect(screen.getAllByText('₦13,814.4').length).toBeGreaterThan(0); // price margin + tolerance margin
     expect(screen.getAllByText('Expected tolerance').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Price margin').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('POS charges').length).toBeGreaterThan(0);
+
+    // Correct the date without losing the unsaved form; returning to a saved date loads its saved data.
+    type('Pump 1A closing', '10,750');
+    type(/^Date/, '2026-10-02');
+    await waitFor(() => expect(screen.getByLabelText('Pump 1A closing').value).toBe('10,750'));
+    type(/^Date/, '2026-10-01');
+    await waitFor(() => expect(screen.getByLabelText('Pump 1A closing').value).toBe('10747.21'));
   });
 
   it('the owner can correct one day\'s tolerance (0.8 to 1.5 L per 20 L) without touching anything else', async () => {

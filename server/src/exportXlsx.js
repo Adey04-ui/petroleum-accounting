@@ -37,7 +37,7 @@ export async function buildWorkbook({ month, days, summary }) {
   }
   for (const [heading, sum] of [
     ['Total sales', true], ['Previous balance', false], ['Card / POS / transfer payments', true], ['Credit sales', true], ['Credit received', true],
-    ['Banked', true], ['Expenses', true], ['Available balance', false], ['Total profit (all products)', true],
+    ['Banked', true], ['Expenses', true], ['POS sales', true], ['POS declared', true], ['POS charges', true], ['Available balance', false], ['Total profit (all products)', true],
   ]) {
     header.push(heading);
     addUp.push(sum);
@@ -54,7 +54,7 @@ export async function buildWorkbook({ month, days, summary }) {
       }
     }
     const b = d.banking;
-    row.push(b.expectedCash, b.previousBalance, b.nonCash, b.creditSales, b.creditReceived, b.banked, b.expenses, b.availableBalance, d.profit);
+    row.push(b.expectedCash, b.previousBalance, b.nonCash, b.creditSales, b.creditReceived, b.banked, b.expenses, b.posTotal, b.posDeclared, b.posLabels?.length ? (b.charges === null ? 'Incomplete' : b.charges) : undefined, b.availableBalance, d.profit);
     return row;
   });
 
@@ -114,6 +114,7 @@ export async function buildWorkbook({ month, days, summary }) {
   add('Daily expenses', summary.expenses);
   for (const a of summary.adjustments) add(a.label, a.amount);
   add('Total expenses', summary.totalExpenses);
+  add('POS charges', summary.totalPosCharges ?? summary.charges ?? 0);
   add('Profit after expenses', summary.profitAfterExpenses, true);
   add('Price-change gain/loss', summary.priceChangeGain);
   add('Profit with no price movement', summary.normalProfit);

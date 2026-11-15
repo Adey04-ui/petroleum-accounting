@@ -53,7 +53,7 @@ function ConfigCard({ onSaved }) {
         body[p] = {
           pumps: f.pumps.split(',').map((x) => x.trim()).filter(Boolean),
           openingCostPerLitre: f.openingCostPerLitre,
-          toleranceRate: f.tolerancePer20 === '' ? 0 : Number(f.tolerancePer20) / 20,
+          toleranceRate: f.tolerancePer20 === '' ? 0 : Number(String(f.tolerancePer20).replace(/,/g, '').trim()) / 20,
           tanks: f.tanks.map((t) => ({ id: t.id, name: t.name, openingStock: t.openingStock })),
         };
       }
